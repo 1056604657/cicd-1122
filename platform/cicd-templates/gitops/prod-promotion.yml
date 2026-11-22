@@ -1,0 +1,13 @@
+# 手动申请成功后自动调用甲方作业。甲方从该申请作业读取清单编号。
+prod-promotion:
+  extends: stg-promotion
+  stage: release
+  needs:
+    - job: release-candidate
+      artifacts: false
+  variables:
+    PROMOTION_ACTION: prod
+  environment:
+    name: "prod/$APP_NAME"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_REF_PROTECTED == "true"'

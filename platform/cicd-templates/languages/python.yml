@@ -1,0 +1,40 @@
+python-test:
+  stage: validate
+  interruptible: true
+  image: python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - if: '$CI_COMMIT_TAG'
+  before_script:
+    - python -m pip install --upgrade pip
+    - pip install --no-cache-dir -r requirements-dev.txt
+    # 以可编辑方式安装本项目，保证 pytest 能导入 src 布局下的包
+    - pip install --no-cache-dir -e .
+  script:
+    - pytest -q --junitxml=test-results.xml
+  artifacts:
+    when: always
+    reports:
+      junit: test-results.xml
+    paths:
+      - test-results.xml
+      # 由项目的 pytest 配置产出（pyproject 里 --cov-report=xml）
+      - coverage.xml
+    expire_in: 30 days
+
+python-build:
+  stage: build
+  interruptible: true
+  image: python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+  before_script:
+    - python -m pip install --upgrade pip build
+  script:
+    - python -m build
+  artifacts:
+    paths:
+      - dist/
+    expire_in: 1 week

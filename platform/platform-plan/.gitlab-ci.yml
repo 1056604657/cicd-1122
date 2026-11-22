@@ -1,0 +1,28 @@
+# 方案仓库只剩一份文档，流水线也只留一件有意义的事：扫密钥。
+# 方案里会贴配置片段和示例地址，最容易把真实凭据带进来。
+#
+# 保留流水线还有一个原因：本仓库开着"流水线成功才允许合并"。没有流水线，
+# MR 就永远没有"成功"的那一天，会永久卡在 ci_must_pass。
+default:
+  tags: [docker-general]
+
+stages:
+  - security
+
+secret-scan:
+  stage: security
+  interruptible: true
+  image:
+    name: zricethezav/gitleaks:v8.24.0@sha256:2bcceac45179b3a91bff11a824d0fb952585b429e54fc928728b1d4d5c3e5176
+    entrypoint: [""]
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+  script:
+    - gitleaks detect --source . --no-banner --redact
+        --report-format json --report-path gitleaks-report.json --exit-code 1
+  artifacts:
+    when: always
+    paths:
+      - gitleaks-report.json
+    expire_in: 30 days

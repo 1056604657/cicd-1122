@@ -1,0 +1,8 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# 平台资产：命名空间（含 Pod Security 标签）、配额、限额、网络策略。
+resources:
+  - namespaces.yaml
+  - quotas.yaml
+  - networkpolicies.yaml

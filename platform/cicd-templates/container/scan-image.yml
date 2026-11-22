@@ -1,0 +1,35 @@
+# 镜像漏洞扫描：对刚推送的镜像做二次校验，阻断带高危漏洞的镜像进入 STG。
+image-scan:
+  stage: image-security
+  interruptible: true
+  image:
+    name: aquasec/trivy:0.58.0@sha256:b88012e2a0a309d6a8a00463d4e63e5e513377fb74eccbc8f9b0f8f81940ebeb
+    entrypoint: [""]
+  # 不使用 needs：本作业与 build-image 的触发规则不同，用 needs 会让只在 tag 存在的
+  # 流水线报 config error。阶段顺序已保证在镜像构建之后执行。
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+  variables:
+    # 漏洞库来源：留空用 trivy 默认（ghcr.io，公网）。内网必须把库同步到内部 OCI
+    # 仓库并指向它，否则每次构建都要连公网、且断网时直接失败。
+    TRIVY_DB_REPOSITORY: ""
+    # 扫描私有仓库镜像需要凭据，与推送用的是同一组变量
+    TRIVY_USERNAME: "$REGISTRY_USER"
+    TRIVY_PASSWORD: "$REGISTRY_PASSWORD"
+  script:
+    - |
+      # 镜像仓库证书不可信时，trivy 也要跟着放宽；一个开关管全部，避免两处不一致
+      INSECURE=false
+      if [ "$REGISTRY_TLS_VERIFY" = "false" ]; then INSECURE=true; fi
+      set -- image --insecure="$INSECURE" --ignore-unfixed --timeout 10m \
+        --severity "$IMAGE_SCAN_SEVERITY" --exit-code 1 \
+        --format json --output trivy-image-report.json
+      if [ -n "${TRIVY_DB_REPOSITORY:-}" ]; then
+        set -- "$@" --db-repository "$TRIVY_DB_REPOSITORY"
+      fi
+      trivy "$@" "$REGISTRY_HOST/$IMAGE_NAME:$IMAGE_TAG"
+  artifacts:
+    when: always
+    paths:
+      - trivy-image-report.json
+    expire_in: 30 days

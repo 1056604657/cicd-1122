@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "python-api"
+version = "1.0.0"
+description = "Demo Python API"
+requires-python = ">=3.12"
+dependencies = []
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# 覆盖率输出：pytest 每次跑都生成 Cobertura 格式的 coverage.xml，
+# 平台的 coverage-gate 读它。参数放在项目配置里而不是模板里，
+# 这样平台不需要知道每个项目要覆盖哪个包。
+[tool.pytest.ini_options]
+addopts = "--cov=python_api --cov-report=xml:coverage.xml --cov-report=term-missing"
+testpaths = ["tests"]

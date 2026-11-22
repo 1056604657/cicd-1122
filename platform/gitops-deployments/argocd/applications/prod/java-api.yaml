@@ -1,0 +1,25 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: java-api-prod
+  namespace: argocd
+  labels:
+    platform.modernkemo/project: demo
+    platform.modernkemo/app: java-api
+    platform.modernkemo/env: prod
+  annotations:
+    platform.modernkemo/owner: platform-team
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: demo-java-api-prod
+  source:
+    repoURL: https://gitlab.internal/platform/gitops-deployments.git
+    targetRevision: main
+    path: apps/demo/java-api/overlays/prod
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: java-api-prod
+  revisionHistoryLimit: 10
+  # 生产禁止自动同步：必须由授权人员在发布窗口内人工 Sync。
+  syncPolicy: {}

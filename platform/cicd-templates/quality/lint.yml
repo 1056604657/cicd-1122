@@ -1,0 +1,78 @@
+# 代码静态检查（lint）。
+#
+# 设计原则：门禁必须是"确定性的、不需要项目额外配置就能跑"的那部分。
+#   · Go：gofmt + go vet 是工具链自带能力，没有"风格之争"，全平台统一强制
+#   · Python：ruff 的安全子集（E9/F63/F7/F82：语法错误、未定义名、f-string 错误），
+#     不做风格裁决——风格类规则由项目在 pyproject.toml 里自行开启，模板不替项目定
+#   · Java / Node：lint 规则强依赖项目配置（checkstyle.xml / eslint 配置），
+#     模板不内置默认规则集，项目提交配置文件后在此作业中启用（见下方注释）。
+#
+# 为什么要 lint 而不是只靠测试：单元测试覆盖不到的路径里，未定义变量、
+# 拼错的名字、格式化不一致导致的 review 噪声，都是 lint 一分钟能解决的。
+
+lint-go:
+  stage: validate
+  interruptible: true
+  image: golang:1.23-alpine@sha256:383395b794dffa5b53012a212365d40c8e37109a626ca30d6151c8348d380b5f
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      exists:
+        - go.mod
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+      exists:
+        - go.mod
+    - when: never
+  script:
+    - |
+      set -e
+      BAD=$(gofmt -l .)
+      if [ -n "$BAD" ]; then
+        echo "ERROR: 以下文件未按 gofmt 格式化："
+        echo "$BAD" | sed 's/^/  /'
+        echo "本地执行 gofmt -w . 后重新提交。"
+        exit 1
+      fi
+      echo "OK: gofmt 通过"
+    - go vet ./...
+
+lint-python:
+  stage: validate
+  interruptible: true
+  image: python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      exists:
+        - "**/*.py"
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+      exists:
+        - "**/*.py"
+    - when: never
+  variables:
+    # 只跑"一定是 bug"的规则；风格规则由项目自行开启，避免平台替项目做风格裁决
+    RUFF_SELECT: "E9,F63,F7,F82"
+  script:
+    - pip install --no-cache-dir ruff >/dev/null
+    - ruff check --select "$RUFF_SELECT" --output-format concise .
+
+# ---------------------------------------------------------------------------
+# Java / Node 的 lint 作业位（项目提供配置后取消注释即可）
+#
+# lint-java:
+#   stage: validate
+#   interruptible: true
+#   image: maven:3.9.6-eclipse-temurin-21@sha256:8d63d4c1902cb12d9e79a70671b18ebe26358cb592561af33ca1808f00d935cb
+#   rules:
+#     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+#   script:
+#     - mvn -B -q checkstyle:check          # 需要项目提供 checkstyle.xml
+#
+# lint-node:
+#   stage: validate
+#   interruptible: true
+#   image: node:22-alpine@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a
+#   rules:
+#     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+#   script:
+#     - npm ci
+#     - npm run lint --if-present           # 需要项目在 package.json 定义 lint
+# ---------------------------------------------------------------------------

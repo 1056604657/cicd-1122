@@ -1,0 +1,24 @@
+# 在选定的历史主干流水线上填写窗口清单编号。手动步骤无需旧构建产物。
+release-candidate:
+  stage: release
+  image: alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc
+  needs:
+    - job: stg-promotion
+      artifacts: false
+  variables:
+    GIT_STRATEGY: empty
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_REF_PROTECTED == "true"'
+      when: manual
+      allow_failure: true
+  script:
+    - |
+      set -eu
+      case "${RELEASE_ID:-}" in
+        REL-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9]) ;;
+        *) echo "请填写窗口清单编号 RELEASE_ID，格式 REL-YYYYMMDD-NNN"; exit 1 ;;
+      esac
+      printf '%s\n' "$RELEASE_ID" > release-id.txt
+  artifacts:
+    paths: [release-id.txt]
+    expire_in: 30 days

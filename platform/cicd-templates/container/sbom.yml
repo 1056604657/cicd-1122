@@ -1,0 +1,47 @@
+# SBOM（软件物料清单）：对**构建出的最终镜像**生成 CycloneDX 清单，随制品留存 365 天。
+#
+# 为什么扫镜像而不是扫源码目录：SBOM 的用途是回答"线上跑的这坨东西里到底有什么组件"。
+# 扫 dir:. 只覆盖源码树和 lock 文件，基础镜像层里的组件全部漏掉，而那正是漏洞最集中的地方。
+#
+# 为什么用 trivy 而不是 syft：
+# anchore/syft 镜像基于 distroless，**镜像里没有 shell**，而 GitLab Runner 执行 script 需要
+# 在容器里起一个 sh，结果直接报 "exec: sh: not found"。它的 :debug 变体有 shell，但只发布
+# amd64，ARM 构建机上跑不了。trivy 镜像有 sh，且已经在 image-scan 里用了同一个 digest，
+# 少一个工具、少一个版本要维护。
+# 代价：trivy 的 cataloger 覆盖度不如 syft（不含部分语言生态的深层依赖），
+# 需要更强覆盖时再引入 syft，但要自带 shell 的自建镜像。
+sbom:
+  stage: image-security
+  interruptible: true
+  image:
+    name: aquasec/trivy:0.58.0@sha256:b88012e2a0a309d6a8a00463d4e63e5e513377fb74eccbc8f9b0f8f81940ebeb
+    entrypoint: [""]
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - if: '$CI_COMMIT_TAG'
+  variables:
+    TRIVY_USERNAME: "$REGISTRY_USER"
+    TRIVY_PASSWORD: "$REGISTRY_PASSWORD"
+  script:
+    - |
+      set -eu
+      # 私有仓库要凭据；TLS 开关跟随 REGISTRY_TLS_VERIFY
+      INSECURE=false
+      if [ "$REGISTRY_TLS_VERIFY" = "false" ]; then INSECURE=true; fi
+      trivy image --quiet --insecure="$INSECURE" \
+        --format cyclonedx --output sbom.json \
+        "$REGISTRY_HOST/$IMAGE_NAME:$IMAGE_TAG"
+    - |
+      set -eu
+      # 空文件或非法 JSON 都算失败：SBOM 存在的意义是可被下游消费，不是占个文件名
+      if [ ! -s sbom.json ]; then
+        echo "ERROR: SBOM 为空，生成失败"
+        exit 1
+      fi
+      echo "SBOM 组件数：$(grep -c '"bom-ref"' sbom.json || echo 0)"
+      echo "SBOM 大小：$(wc -c < sbom.json) 字节"
+  artifacts:
+    when: always
+    paths:
+      - sbom.json
+    expire_in: 365 days

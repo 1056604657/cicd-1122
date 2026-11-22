@@ -1,0 +1,123 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-restrict
+  namespace: java-api-stg
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+  # 入向：只允许同命名空间互访。如需经 Ingress 暴露服务，
+  # 按下方注释样例放开指定命名空间来源，禁止直接放开 0.0.0.0/0。
+  # - from:
+  #     - namespaceSelector:
+  #         matchLabels:
+  #           kubernetes.io/metadata.name: ingress-system
+  ingress:
+    - from:
+        - podSelector: {}
+  # 出向：只允许访问 kube-dns，其它出站按需在应用专属策略中追加。
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-restrict
+  namespace: python-api-stg
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+  # 入向：只允许同命名空间互访。如需经 Ingress 暴露服务，
+  # 按下方注释样例放开指定命名空间来源，禁止直接放开 0.0.0.0/0。
+  # - from:
+  #     - namespaceSelector:
+  #         matchLabels:
+  #           kubernetes.io/metadata.name: ingress-system
+  ingress:
+    - from:
+        - podSelector: {}
+  # 出向：只允许访问 kube-dns，其它出站按需在应用专属策略中追加。
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-restrict
+  namespace: go-api-stg
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+  # 入向：只允许同命名空间互访。如需经 Ingress 暴露服务，
+  # 按下方注释样例放开指定命名空间来源，禁止直接放开 0.0.0.0/0。
+  # - from:
+  #     - namespaceSelector:
+  #         matchLabels:
+  #           kubernetes.io/metadata.name: ingress-system
+  ingress:
+    - from:
+        - podSelector: {}
+  # 出向：只允许访问 kube-dns，其它出站按需在应用专属策略中追加。
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-restrict
+  namespace: frontend-web-stg
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+  # 入向：只允许同命名空间互访。如需经 Ingress 暴露服务，
+  # 按下方注释样例放开指定命名空间来源，禁止直接放开 0.0.0.0/0。
+  # - from:
+  #     - namespaceSelector:
+  #         matchLabels:
+  #           kubernetes.io/metadata.name: ingress-system
+  ingress:
+    - from:
+        - podSelector: {}
+  # 出向：只允许访问 kube-dns，其它出站按需在应用专属策略中追加。
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP

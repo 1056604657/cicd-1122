@@ -1,0 +1,43 @@
+# 全平台标准变量与默认值。
+# 业务仓库只需覆盖项目级差异（PROJECT_KEY / APP_NAME / K8S_NAMESPACE），
+# 其余变量保持平台统一，避免各项目自行其是。
+
+# 普通测试、扫描作业统一调度到非特权 docker-general Runner；禁止作业跳过标签匹配，
+# 防止供应商通过指定其它 Runner 绕过平台构建约束。
+default:
+  tags:
+    - docker-general
+  # 作业默认超时。防止供应商代码卡死长期占用构建资源；
+  # 发布类作业（release-candidate / prod-promotion）在各自模板内覆盖为 2h。
+  timeout: 1h
+  # 只对基础设施类故障重试，代码/扫描失败绝不重试——重试不能掩盖质量问题。
+  # 失败是确定性的（测试、漏洞命中）时不重试。
+  retry:
+    max: 2
+    when:
+      - runner_system_failure
+      - stuck_or_timeout_failure
+
+variables:
+  # ---- 质量与安全门禁 ----
+  # 安全扫描在标准流水线中始终自动执行，不允许业务项目关闭或降级；
+  # 阻断阈值只由平台/安全角色调整。
+  SCA_SEVERITY: "HIGH,CRITICAL"
+  IMAGE_SCAN_SEVERITY: "HIGH,CRITICAL"
+  SAST_RULESET: "p/default"
+
+  # ---- 制品与镜像 ----
+  # 平台统一镜像仓库；业务仓库可覆盖为项目专属仓库
+  REGISTRY_HOST: "registry.internal"
+  # true: 仓库使用可信 HTTPS 证书（生产必须为 true）
+  # false: 内网 HTTP 或自签证书仓库（仅限内网/实验环境）
+  REGISTRY_TLS_VERIFY: "true"
+  IMAGE_NAME: "$CI_PROJECT_PATH_SLUG"
+
+  # ---- 镜像仓库凭据 ----
+  # 由「组级 CI 变量」提供（protected + masked），不要写进任何仓库文件。
+  # 留空时按匿名访问继续：内部实验仓库可能允许匿名，生产 Harbor/Nexus 一定拒绝，
+  # 所以正式环境必须配。未配时流水线会在 push 阶段明确报 unauthorized。
+  REGISTRY_USER: ""
+  REGISTRY_PASSWORD: ""
+  IMAGE_TAG: "$CI_COMMIT_SHORT_SHA"

@@ -1,0 +1,30 @@
+# 依赖漏洞扫描（SCA）：只对可修复漏洞阻断（--ignore-unfixed），
+# 避免因上游长期未修复的漏洞导致主线永久红灯。
+dependency-scan:
+  stage: security
+  interruptible: true
+  image:
+    name: aquasec/trivy:0.58.0@sha256:b88012e2a0a309d6a8a00463d4e63e5e513377fb74eccbc8f9b0f8f81940ebeb
+    entrypoint: [""]
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - if: '$CI_COMMIT_TAG'
+  # 内网环境应把漏洞库同步到本地 OCI 仓库，避免每次构建都拉公网 DB
+  variables:
+    # 留空 = 用 trivy 默认漏洞库（公网）。内网环境应镜像到内部仓库后在此指向它。
+    TRIVY_DB_REPOSITORY: ""
+  script:
+    - |
+      set -- fs --scanners vuln --ignore-unfixed --timeout 10m \
+        --severity "$SCA_SEVERITY" --exit-code 1 \
+        --format json --output trivy-fs-report.json
+      if [ -n "${TRIVY_DB_REPOSITORY:-}" ]; then
+        set -- "$@" --db-repository "$TRIVY_DB_REPOSITORY"
+      fi
+      trivy "$@" .
+  artifacts:
+    when: always
+    paths:
+      - trivy-fs-report.json
+    expire_in: 30 days

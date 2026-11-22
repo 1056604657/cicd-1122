@@ -1,0 +1,35 @@
+go-test:
+  stage: validate
+  interruptible: true
+  image: golang:1.26-alpine@sha256:ecb67f987aa1a57794c91d19ade7ae0209f2f0f5496aaef9e6ae85ddf92d02ab
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - if: '$CI_COMMIT_TAG'
+  script:
+    - go vet ./...
+    # 覆盖率报告是质量门的输入，必须在这一步产出；交给项目自己写容易漏
+    - go test ./... -coverprofile=coverage.out -covermode=atomic
+  artifacts:
+    when: always
+    paths:
+      - coverage.out
+    expire_in: 1 week
+
+go-build:
+  stage: build
+  interruptible: true
+  image: golang:1.26-alpine@sha256:ecb67f987aa1a57794c91d19ade7ae0209f2f0f5496aaef9e6ae85ddf92d02ab
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+  script:
+    # 输出到目录，兼容 ./... 匹配到多个 package 的情况。
+    # CGO_ENABLED=0：产物必须是静态二进制。运行镜像是 alpine（musl），
+    # 如果这里带 CGO 编译出动态链接的二进制，镜像能构建成功但启动时才报找不到解释器，
+    # 而那时流水线已经绿了——所以编译参数必须在模板里定死，不交给项目自己决定。
+    - CGO_ENABLED=0 go build -o bin/ ./...
+  artifacts:
+    paths:
+      - bin/
+    expire_in: 1 week

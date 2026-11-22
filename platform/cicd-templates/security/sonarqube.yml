@@ -1,0 +1,56 @@
+# SonarQube 扫描与质量门禁。
+#
+# 定位：semgrep 是「模式匹配型 SAST」，快、规则可自定义，但不出代码度量；
+# SonarQube 是「规则引擎 + 代码度量 + 质量门」的平台，覆盖可维护性、重复率、
+# 复杂度、覆盖率与安全热点。两者是互补关系，不能用其中一个替代另一个：
+#   · semgrep 负责"这段代码有注入风险"（MR 级、秒级反馈）
+#   · SonarQube 负责"这个版本的质量门是否达标"（版本级、趋势与基线）
+#
+# 接入前置（本项目侧无需改代码，只需平台配置变量）：
+#   SONAR_HOST_URL   SonarQube 服务地址，如 https://sonar.internal
+#   SONAR_TOKEN      项目分析令牌（Masked + Protected，按项目或按组下发）
+#   项目侧可选：sonar-project.properties（source/tests 路径、排除规则）
+#
+# 关键点：sonar.qualitygate.wait=true 会把流水线挂在质量门上——门不过则作业失败。
+# 没有这一行，SonarQube 就只是个"看板"，不构成门禁。
+sonarqube:
+  stage: security
+  interruptible: true
+  image:
+    name: sonarsource/sonar-scanner-cli:11.1@sha256:5812d28892fa5ad8ba72d3a8caa4e8da8c3dd7458057bdd24bcc7c201522e40a
+    entrypoint: [""]
+  variables:
+    SONAR_USER_HOME: "${CI_PROJECT_DIR}/.sonar"
+    GIT_DEPTH: "0"          # 需要完整历史才能算"新增代码"与 blame
+  cache:
+    key: "sonar-${CI_PROJECT_NAME}"
+    paths:
+      - .sonar/cache
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - if: '$CI_COMMIT_TAG'
+  script:
+    - |
+      if [ -z "${SONAR_HOST_URL:-}" ] || [ -z "${SONAR_TOKEN:-}" ]; then
+        echo "ERROR: 缺少 SONAR_HOST_URL / SONAR_TOKEN。"
+        echo "       质量门禁不允许静默跳过——请在项目或组的 CI/CD 变量中配置后重试。"
+        exit 1
+      fi
+    - |
+      sonar-scanner \
+        -Dsonar.host.url="$SONAR_HOST_URL" \
+        -Dsonar.token="$SONAR_TOKEN" \
+        -Dsonar.projectKey="${SONAR_PROJECT_KEY:-$CI_PROJECT_PATH_SLUG}" \
+        -Dsonar.projectName="${SONAR_PROJECT_NAME:-$CI_PROJECT_PATH}" \
+        -Dsonar.projectVersion="${CI_COMMIT_TAG:-$CI_COMMIT_SHORT_SHA}" \
+        -Dsonar.qualitygate.wait=true \
+        -Dsonar.qualitygate.timeout=600 \
+        -Dsonar.scm.revision="$CI_COMMIT_SHA" \
+        -Dsonar.links.ci="$CI_PIPELINE_URL"
+  artifacts:
+    when: always
+    paths:
+      - .scannerwork/report-task.txt
+    expire_in: 30 days
+  timeout: 30m

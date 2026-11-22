@@ -1,0 +1,132 @@
+# 单元测试覆盖率门禁。
+#
+# 只跑测试不设阈值，覆盖率会一路下滑而无人察觉——这是最常见的"形式上门禁"。
+# 本作业读取各语言测试阶段产出的覆盖率报告，低于 MIN_COVERAGE 即阻断。
+#
+# 认这四种标准格式（不让每家供应商各写一套）：
+#   · Cobertura XML   coverage.xml                      Python(pytest-cov) / Node(vitest|jest)
+#   · JaCoCo XML      target/site/jacoco/jacoco.xml     Java
+#     JaCoCo 的 XML 不是 Cobertura 格式、没有 line-rate 属性，必须单独解析
+#   · Go 原生覆盖率   coverage.out                      Go(go test -coverprofile)
+#   · lcov            lcov.info / coverage/lcov.info    Node(c8 --reporter=lcov)
+#
+# 报告由各语言测试作业作为 artifact 交出（模板已配好），项目侧要在自己的构建配置里
+# 开启覆盖率输出：Java→jacoco-maven-plugin、Python→pytest --cov、Node→c8。
+#
+# 改这段脚本前先看两个坑（都是踩过的，且症状很难联想）：
+#   1. 镜像里只有 ash，没有 bash —— 不能用 <(...) 进程替换
+#   2. set -e 下不要写 `[ 条件 ] && 动作`：条件不成立时整条命令返回非 0，
+#      脚本会直接退出且一行日志都不打，看起来像"莫名其妙失败"
+coverage-gate:
+  stage: quality
+  interruptible: true
+  image: alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc
+  variables:
+    # 门槛：低于该百分比阻断。新项目建议 60，存量项目可先降级但必须写进例外单。
+    MIN_COVERAGE: "60"
+    # true: 找不到覆盖率报告即失败（标准要求）；false: 只告警
+    COVERAGE_REQUIRED: "true"
+  needs:
+    - job: java-maven-test
+      artifacts: true
+      optional: true
+    - job: python-test
+      artifacts: true
+      optional: true
+    - job: go-test
+      artifacts: true
+      optional: true
+    - job: frontend-test
+      artifacts: true
+      optional: true
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - if: '$CI_COMMIT_TAG'
+  script:
+    - |
+      set -eu
+      PCT=""
+      SRC=""
+
+      # ---- 1) Cobertura XML ----
+      if [ -f coverage.xml ]; then
+        RATE=$(grep -o 'line-rate="[0-9.]*"' coverage.xml | head -1 | sed 's/[^0-9.]//g' || true)
+        if [ -n "${RATE:-}" ]; then
+          PCT=$(awk -v r="$RATE" 'BEGIN{printf "%.1f", r*100}')
+          SRC="coverage.xml (Cobertura line-rate)"
+        fi
+      fi
+
+      # ---- 2) JaCoCo XML ----
+      # report 级汇总的 <counter type="LINE"> 在文件末尾，取最后一次出现；
+      # 前面的都是 class/method/package 级局部计数，取错会算成单个类的比例。
+      if [ -z "$PCT" ]; then
+        for jf in target/site/jacoco/jacoco.xml jacoco.xml; do
+          if [ ! -f "$jf" ]; then
+            continue
+          fi
+          # 注意：JaCoCo 按字母序输出属性，实际是 missed 在前、covered 在后。
+          # 所以不能写死顺序，整段抓下来再分别提取。
+          COUNTER=$(grep -o '<counter type="LINE"[^>]*>' "$jf" | tail -1 || true)
+          COVERED=$(printf '%s' "$COUNTER" | sed -nE 's/.*covered="([0-9]+)".*/\1/p')
+          MISSED=$(printf '%s' "$COUNTER" | sed -nE 's/.*missed="([0-9]+)".*/\1/p')
+          if [ -n "$COVERED" ] && [ -n "$MISSED" ]; then
+            TOTAL=$((COVERED + MISSED))
+            if [ "$TOTAL" -gt 0 ]; then
+              PCT=$(awk -v c="$COVERED" -v t="$TOTAL" 'BEGIN{printf "%.1f", c*100/t}')
+              SRC="$jf (JaCoCo LINE)"
+            fi
+          fi
+        done
+      fi
+
+      # ---- 3) Go coverage.out ----
+      if [ -z "$PCT" ] && [ -f coverage.out ]; then
+        PCT=$(awk '
+          /^mode:/ {next}
+          NF>=3 { total += $2; if ($3+0 > 0) hit += $2 }
+          END { if (total>0) printf "%.1f", hit*100/total; else printf "0.0" }
+        ' coverage.out)
+        SRC="coverage.out (Go 覆盖行数占比)"
+      fi
+
+      # ---- 4) lcov ----
+      if [ -z "$PCT" ]; then
+        for f in lcov.info coverage/lcov.info; do
+          if [ ! -f "$f" ]; then
+            continue
+          fi
+          # lcov.info 是"每个源文件一条记录"，LF/LH 会出现多次。
+          # 只取第一条会把覆盖率算成单个文件的比例，必须求和。
+          LF=$(awk -F: '/^LF:/{s+=$2} END{print s+0}' "$f")
+          LH=$(awk -F: '/^LH:/{s+=$2} END{print s+0}' "$f")
+          if [ "$LF" -gt 0 ]; then
+            PCT=$(awk -v lf="$LF" -v lh="$LH" 'BEGIN{printf "%.1f", lh*100/lf}')
+            SRC="$f (lcov)"
+          fi
+        done
+      fi
+
+      # ---- 判定 ----
+      if [ -z "$PCT" ]; then
+        if [ "$COVERAGE_REQUIRED" = "true" ]; then
+          echo "ERROR: 未找到覆盖率报告（coverage.xml / jacoco.xml / coverage.out / lcov.info）。"
+          echo "       标准要求项目必须输出覆盖率，请在构建配置里开启："
+          echo "       Java→jacoco-maven-plugin  Python→pytest --cov  Go→模板已加 -coverprofile  Node→c8 --reporter=lcov"
+          exit 1
+        fi
+        echo "WARN: 未找到覆盖率报告，按 COVERAGE_REQUIRED=false 仅告警"
+        exit 0
+      fi
+
+      echo "覆盖率：${PCT}%  来源：${SRC}  门槛：${MIN_COVERAGE}%"
+
+      # awk 退出码 0 表示"低于门槛"。用 if 包住而不是 A && B ——
+      # 后者在 set -e 下，条件不成立时会把整个脚本带走。
+      if awk -v p="$PCT" -v m="$MIN_COVERAGE" 'BEGIN{exit !(p+0 < m+0)}'; then
+        echo "ERROR: 覆盖率 ${PCT}% 低于门槛 ${MIN_COVERAGE}%"
+        exit 1
+      fi
+      echo "OK: 覆盖率达标"
+  coverage: '/覆盖率：([0-9.]+)%/'

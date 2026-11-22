@@ -1,0 +1,81 @@
+# 镜像构建：buildah 无守护进程构建，不需要挂载宿主 docker.sock。
+# 推送后把 digest 落到 .image-digest，供 GitOps 晋级与发布证据链使用。
+build-image:
+  stage: package
+  interruptible: false
+  # 单独选池：buildah 需要 privileged，把它和其它作业放在同一个池里，
+  # 等于让每个作业（包括供应商的测试脚本）都拿到等同宿主 root 的能力。
+  tags: [docker-build]
+  image: quay.io/buildah/stable:v1.36.0@sha256:3a4f175b98397ed206f57297470b9477a60fa8c54846a6a8c3c401ff00c6fccd
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - when: never
+  variables:
+    # 构建隔离方式；chroot 不需要嵌套 user namespace 之外的额外能力
+    BUILDAH_ISOLATION: "chroot"
+    STORAGE_DRIVER: "vfs"
+  before_script:
+    # 1) 基础镜像短名解析：允许 FROM maven:3.9.6 这类短名按 docker.io 解析。
+    #    注意：标准要求 Dockerfile 的 FROM 写全限定名（docker.io/library/xxx@sha256:…），
+    #    因为「短名 + digest」组合下 buildah 会先按 unqualified-search 去 fedora/redhat 等
+    #    仓库找同一个 digest，必然失败。这里只是兜底，不替代标准写法。
+    - |
+      if grep -qE '^[[:space:]]*short-name-mode[[:space:]]*=[[:space:]]*"enforcing"' /etc/containers/registries.conf 2>/dev/null; then
+        sed -i -E 's/^[[:space:]]*short-name-mode[[:space:]]*=[[:space:]]*"enforcing"/short-name-mode = "permissive"/' /etc/containers/registries.conf
+      fi
+    # 2) 可选：内网/受限网络下为 docker.io 配置镜像加速（BUILDAH_REGISTRY_MIRROR）
+    - |
+      if [ -n "${BUILDAH_REGISTRY_MIRROR:-}" ]; then
+        cat >> /etc/containers/registries.conf <<EOF
+
+      [[registry]]
+      location = "docker.io"
+
+      [[registry.mirror]]
+      location = "${BUILDAH_REGISTRY_MIRROR}"
+      EOF
+      fi
+  script:
+    # 前置断言：镜像只打包 CI build 阶段的产物，所以产物必须在。
+    # 产物目录缺失时 COPY 会在 buildah 内部报错，信息很难懂；这里先给出明确原因。
+    - |
+      if [ ! -d target ] && [ ! -d dist ] && [ ! -d bin ]; then
+        echo "ERROR: 找不到任何构建产物目录（target/ dist/ bin/）"
+        echo "       镜像只允许打包 build 阶段产出的制品，不允许在 Dockerfile 里重新编译。"
+        echo "       请检查 build 作业的 artifacts 是否声明、产物路径是否与 Dockerfile 的 COPY 一致。"
+        exit 1
+      fi
+    # 推送前登录镜像仓库。实验室用匿名可推的本地 registry，所以以前没暴露这个缺口；
+    # 真实的 Harbor/Nexus 一律要求认证，没有这一步会在 push 时 unauthorized。
+    - |
+      if [ -n "${REGISTRY_USER:-}" ] && [ -n "${REGISTRY_PASSWORD:-}" ]; then
+        printf '%s' "$REGISTRY_PASSWORD" | buildah login \
+          --username "$REGISTRY_USER" --password-stdin \
+          --tls-verify="$REGISTRY_TLS_VERIFY" "$REGISTRY_HOST"
+      else
+        echo "WARN: 未提供 REGISTRY_USER / REGISTRY_PASSWORD，按匿名推送继续。"
+        echo "      生产镜像仓库通常要求认证，请在组级 CI 变量里配置。"
+      fi
+    - |
+      buildah bud \
+        --isolation "$BUILDAH_ISOLATION" \
+        --format docker \
+        --storage-driver "$STORAGE_DRIVER" \
+        --layers \
+        --label "org.opencontainers.image.revision=$CI_COMMIT_SHA" \
+        --label "org.opencontainers.image.source=$CI_PROJECT_URL" \
+        --label "org.opencontainers.image.created=$CI_PIPELINE_CREATED_AT" \
+        -t "$REGISTRY_HOST/$IMAGE_NAME:$IMAGE_TAG" .
+    - |
+      buildah push --digestfile .image-digest \
+        --tls-verify="$REGISTRY_TLS_VERIFY" \
+        "$REGISTRY_HOST/$IMAGE_NAME:$IMAGE_TAG" \
+        "docker://$REGISTRY_HOST/$IMAGE_NAME:$IMAGE_TAG"
+    - |
+      echo "IMAGE_REF=$REGISTRY_HOST/$IMAGE_NAME@$(cat .image-digest)" > image.env
+      cat image.env
+  artifacts:
+    paths:
+      - .image-digest
+      - image.env
+    expire_in: 90 days

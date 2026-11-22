@@ -1,0 +1,42 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: platform-prod
+  namespace: argocd
+  labels:
+    platform.modernkemo/project: platform
+    platform.modernkemo/env: prod
+spec:
+  description: "平台资产（prod）：命名空间、配额、限额、网络策略。仅平台组可管理。"
+  sourceRepos:
+    - "https://gitlab.internal/platform/gitops-deployments.git"
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: "*-prod"
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+  namespaceResourceWhitelist:
+    - group: ""
+      kind: ResourceQuota
+    - group: ""
+      kind: LimitRange
+    - group: networking.k8s.io
+      kind: NetworkPolicy
+  orphanedResources:
+    warn: true
+  syncWindows:
+    - kind: allow
+      schedule: "0 22 * * 2"
+      duration: 4h
+      timeZone: Asia/Shanghai
+      applications:
+        - "*"
+      manualSync: false
+    # 月度结账与重大活动期冻结，示例：每月 28 日起 4 天禁止同步。
+    - kind: deny
+      schedule: "0 0 28 * *"
+      duration: 96h
+      timeZone: Asia/Shanghai
+      applications:
+        - "*"

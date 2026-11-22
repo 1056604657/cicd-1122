@@ -1,0 +1,81 @@
+# DAST：对 STG 已部署服务做动态安全扫描（OWASP ZAP baseline）。
+#
+# 为什么需要它：SAST/SCA 只看代码和依赖，看不到"跑起来之后"的问题——
+# 缺失的安全响应头、暴露的调试接口、CORS 配置过宽、目录列表、Cookie 未加 HttpOnly。
+# 这些只有对运行中的服务发请求才能发现。
+#
+# 前置：STG 已由 Argo CD 同步完成且服务可访问。作业先探测 /healthz，
+# 探不通就判失败——不允对空环境"通过"扫描。
+dast-baseline:
+  stage: dast
+  interruptible: true
+  image:
+    name: ghcr.io/zaproxy/zaproxy:stable@sha256:9624669db72f54d86c4b46a7064518bd9bf79d8c61a4c31befa9923489f328af
+    entrypoint: [""]
+  variables:
+    # 由项目侧覆盖为 STG 实际访问地址；发布流水线里也可由 GitOps 域名推导
+    TARGET_URL: "${DAST_TARGET_URL}"
+    ZAP_FAIL_ON: "High"          # 命中 High 风险告警即阻断；生产建议 High，逐步收紧到 Medium
+    ZAP_TIMEOUT_MIN: "20"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+      when: manual               # 需要 STG 就绪，默认手动触发；可改为自动并加等待
+      allow_failure: false
+    - when: never
+  script:
+    - |
+      set -e
+      if [ -z "${TARGET_URL:-}" ]; then
+        echo "ERROR: 缺少 DAST_TARGET_URL（STG 访问地址）"
+        exit 1
+      fi
+      echo "目标：$TARGET_URL"
+      # 1) 就绪探测：连不上直接失败，避免"扫了个空环境"却报通过
+      ok=0
+      for i in $(seq 1 30); do
+        if wget -q -T 5 -O /dev/null "${TARGET_URL%/}/healthz" 2>/dev/null \
+           || wget -q -T 5 -O /dev/null "$TARGET_URL" 2>/dev/null; then
+          ok=1; break
+        fi
+        echo "等待服务就绪… ($i/30)"; sleep 10
+      done
+      if [ "$ok" -ne 1 ]; then
+        echo "ERROR: STG 目标不可达，拒绝在未就绪环境上出扫描结论"
+        exit 1
+      fi
+    - mkdir -p /zap/wrk
+    - |
+      RC=0
+      zap-baseline.py -t "$TARGET_URL" -J report.json -r report.html \
+        -m "$ZAP_TIMEOUT_MIN" -I || RC=$?
+      echo "zap exit=$RC（0=无告警 1=有告警 2=执行失败）"
+
+      # 2) 执行失败一律阻断。绝不能"没出报告就当作通过"——
+      #    这是门禁最常见的失效方式：扫描没跑起来，流水线却是绿的。
+      if [ "$RC" -eq 2 ]; then
+        echo "ERROR: ZAP 执行失败（exit=2），不产生扫描结论"
+        exit 1
+      fi
+      if [ ! -f report.json ]; then
+        echo "ERROR: ZAP 未生成 report.json，无法判定，按失败处理"
+        exit 1
+      fi
+
+      # 3) 按严重级别判定。riskcode: 3=High 2=Medium 1=Low 0=Informational
+      HIGH=$(grep -o '"riskcode": *"3"' report.json | wc -l | tr -d ' ')
+      MED=$(grep -o '"riskcode": *"2"' report.json | wc -l | tr -d ' ')
+      echo "告警统计：High=$HIGH Medium=$MED  阈值=$ZAP_FAIL_ON"
+      if [ "$ZAP_FAIL_ON" = "High" ] && [ "$HIGH" -gt 0 ]; then
+        echo "ERROR: 存在 High 风险告警，阻断发布"; exit 1
+      fi
+      if [ "$ZAP_FAIL_ON" = "Medium" ] && [ $((HIGH + MED)) -gt 0 ]; then
+        echo "ERROR: 存在 High/Medium 风险告警，阻断发布"; exit 1
+      fi
+      echo "OK: 动态扫描通过（阈值 $ZAP_FAIL_ON）"
+  artifacts:
+    when: always
+    paths:
+      - report.html
+      - report.json
+    expire_in: 90 days
+  timeout: 40m

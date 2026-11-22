@@ -1,0 +1,59 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: java-api-prod
+  labels:
+    app.kubernetes.io/name: java-api
+    app.kubernetes.io/env: prod
+    app.kubernetes.io/managed-by: argocd
+    # Pod Security：restricted 与 Deployment 安全基线一致；
+    # 需要 root 的镜像必须先走例外申请，不得把 enforce 降级为 baseline。
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: python-api-prod
+  labels:
+    app.kubernetes.io/name: python-api
+    app.kubernetes.io/env: prod
+    app.kubernetes.io/managed-by: argocd
+    # Pod Security：restricted 与 Deployment 安全基线一致；
+    # 需要 root 的镜像必须先走例外申请，不得把 enforce 降级为 baseline。
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: go-api-prod
+  labels:
+    app.kubernetes.io/name: go-api
+    app.kubernetes.io/env: prod
+    app.kubernetes.io/managed-by: argocd
+    # Pod Security：restricted 与 Deployment 安全基线一致；
+    # 需要 root 的镜像必须先走例外申请，不得把 enforce 降级为 baseline。
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: frontend-web-prod
+  labels:
+    app.kubernetes.io/name: frontend-web
+    app.kubernetes.io/env: prod
+    app.kubernetes.io/managed-by: argocd
+    # Pod Security：restricted 与 Deployment 安全基线一致；
+    # 需要 root 的镜像必须先走例外申请，不得把 enforce 降级为 baseline。
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

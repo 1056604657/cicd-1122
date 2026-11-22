@@ -1,0 +1,6 @@
+{
+  "promote-java-api": ["demo-projects/java-api", "demo/java-api", "java-maven"],
+  "promote-python-api": ["demo-projects/python-api", "demo/python-api", "python"],
+  "promote-go-api": ["demo-projects/go-api", "demo/go-api", "go"],
+  "promote-frontend-web": ["demo-projects/frontend-web", "demo/frontend-web", "frontend"]
+}

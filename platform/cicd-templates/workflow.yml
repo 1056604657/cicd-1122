@@ -1,0 +1,16 @@
+# 统一工作流规则：同一提交只产生一条流水线，避免分支流水线与 MR 流水线重复。
+workflow:
+  # 同一分支有新提交时，自动取消尚未完成的冗余流水线，释放 Runner；
+  # 取消仅对 interruptible: true 的作业生效，发布类作业不受影响。
+  auto_cancel:
+    on_new_commit: interruptible
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    # 默认分支主干流水线：构建、扫描、推送镜像、写 GitOps
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    # 已有 MR 的源分支不再触发独立分支流水线
+    - if: '$CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS'
+      when: never
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH'
+      when: never
+    - when: never

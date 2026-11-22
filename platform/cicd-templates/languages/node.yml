@@ -1,0 +1,32 @@
+frontend-test:
+  stage: validate
+  interruptible: true
+  image: node:22-alpine@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - if: '$CI_COMMIT_TAG'
+  script:
+    - npm ci
+    - npm test
+  artifacts:
+    when: always
+    # 覆盖率由项目的 test 脚本产出（c8 --reporter=lcov），这里只负责把它交出去
+    paths:
+      - coverage/lcov.info
+    expire_in: 1 week
+
+frontend-build:
+  stage: build
+  interruptible: true
+  image: node:22-alpine@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+  script:
+    - npm ci
+    - npm run build
+  artifacts:
+    paths:
+      - dist/
+    expire_in: 1 week

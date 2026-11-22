@@ -1,0 +1,22 @@
+# 源码静态分析（SAST）：规则集由 SAST_RULESET 指定。
+# 企业环境应把规则集镜像到内部（如 semgrep 私有 registry 或本地 rules 目录），
+# 避免构建时依赖公网。
+sast:
+  stage: security
+  interruptible: true
+  image:
+    name: returntocorp/semgrep:1.85.0@sha256:b4c2272e0a2e59ca551ff96d3bbae657bd2b7356e339af557b27a96d9e751544
+    entrypoint: [""]
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - if: '$CI_COMMIT_TAG'
+  variables:
+    SEMGREP_SEND_METRICS: "off"
+  script:
+    - semgrep --config "$SAST_RULESET" --error --json --output semgrep-report.json .
+  artifacts:
+    when: always
+    paths:
+      - semgrep-report.json
+    expire_in: 30 days

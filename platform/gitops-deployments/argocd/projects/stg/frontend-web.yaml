@@ -1,0 +1,27 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: demo-frontend-web-stg
+  namespace: argocd
+  labels:
+    platform.modernkemo/project: demo
+    platform.modernkemo/app: frontend-web
+    platform.modernkemo/env: stg
+spec:
+  description: "demo / frontend-web / stg（供应商应用项目）"
+  sourceRepos:
+    - "https://gitlab.internal/platform/gitops-deployments.git"
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: frontend-web-stg
+  # 供应商项目禁止创建任何集群级资源；Namespace 由平台侧平台应用管理。
+  clusterResourceWhitelist: []
+  namespaceResourceWhitelist:
+    - group: apps
+      kind: Deployment
+    - group: ""
+      kind: Service
+    - group: ""
+      kind: ConfigMap
+  orphanedResources:
+    warn: true

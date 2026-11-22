@@ -1,0 +1,108 @@
+# 许可证合规：扫描与判定分离。
+#
+# 为什么拆两步：trivy 负责"收集证据"（把仓库里所有组件的许可证声明落成 JSON），
+# 判定规则放在独立作业里（纯 Python，可读、可审、可测）。
+# 早期版本把判定写在 trivy 容器里用 grep 做——失败的原因很具体：
+# aquasec/trivy 镜像里没有 grep/tr/wc，脚本根本没跑起来，而流水线只报了 exit 1。
+# 这类"看起来跑了、其实没跑"的门禁比没有门禁更危险，所以改成显式两步。
+#
+# 阻断策略：命中 LICENSE_DENY 中任一许可证即失败。
+# GPL/AGPL/SSPL 这类传染性许可证进入商业闭源交付物是法律风险，不是技术偏好。
+# 确有需要（如仅测试依赖）必须提交例外单，由安全评审在 LICENSE_ALLOW
+# 按「组件名:许可证」放行，白名单变更走 MR 留痕。
+
+license-scan:
+  stage: security
+  interruptible: true
+  image:
+    name: aquasec/trivy:0.58.0@sha256:b88012e2a0a309d6a8a00463d4e63e5e513377fb74eccbc8f9b0f8f81940ebeb
+    entrypoint: [""]
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - if: '$CI_COMMIT_TAG'
+  variables:
+    # 许可证扫描不依赖漏洞库，强制离线，内网也能跑
+    TRIVY_SKIP_DB_UPDATE: "true"
+    TRIVY_SKIP_JAVA_DB_UPDATE: "true"
+  script:
+    - trivy fs --scanners license --license-full --timeout 10m
+        --format json --output license-report.json .
+  artifacts:
+    when: always
+    paths:
+      - license-report.json
+    expire_in: 365 days
+
+license-gate:
+  stage: security
+  interruptible: true
+  image: python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b
+  needs:
+    - job: license-scan
+      artifacts: true
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - if: '$CI_COMMIT_TAG'
+  variables:
+    # 禁止进入商业交付物的许可证（调整需安全评审批次）
+    LICENSE_DENY: "GPL-3.0,AGPL-3.0,SSPL-1.0,OSL-3.0,CPAL-1.0,EUPL-1.2"
+    # 例外白名单，格式：组件名:许可证，逗号分隔
+    LICENSE_ALLOW: ""
+  script:
+    - |
+      cat > /tmp/gate.py <<'PY'
+      import json, os, sys
+
+      deny = [x.strip().lower() for x in os.environ.get("LICENSE_DENY", "").split(",") if x.strip()]
+
+      # 例外格式「组件名:许可证」。组件名本身可能含冒号（如 com.example:lib），
+      # 因此从右侧切一次；并且必须精确匹配，不能用子串——
+      # 子串匹配会让 "foo" 放过 "foobar"、"MIT" 放过 "MIT-0"，等于白名单泄漏。
+      allow_pairs = []
+      for entry in os.environ.get("LICENSE_ALLOW", "").split(","):
+          entry = entry.strip().lower()
+          if not entry:
+              continue
+          if ":" not in entry:
+              print(f"WARN: 例外条目缺少许可证部分，已忽略：{entry}")
+              continue
+          pkg_part, lic_part = entry.rsplit(":", 1)
+          allow_pairs.append((pkg_part.strip(), lic_part.strip()))
+
+      try:
+          data = json.load(open("license-report.json", encoding="utf-8"))
+      except FileNotFoundError:
+          print("ERROR: 未找到 license-report.json，扫描作业可能失败，不能当作通过")
+          sys.exit(1)
+      except json.JSONDecodeError:
+          print("ERROR: license-report.json 不是合法 JSON")
+          sys.exit(1)
+
+      hits, scanned = [], 0
+      for res in data.get("Results") or []:
+          for lic in res.get("Licenses") or []:
+              scanned += 1
+              name = (lic.get("Name") or "").strip().lower()
+              pkg = lic.get("PkgName") or lic.get("FilePath") or "?"
+              severity = lic.get("Severity") or "-"
+              matched = [d for d in deny if name == d or name.startswith(d + "-") or name.startswith(d + "+")]
+              if not matched:
+                  continue
+              pkg_l = pkg.lower()
+              if any(pk == pkg_l and (lic_ == name or name.startswith(lic_ + "-"))
+                     for pk, lic_ in allow_pairs):
+                  print(f"  · 例外放行：{pkg} -> {lic.get('Name')}")
+                  continue
+              hits.append((pkg, lic.get("Name"), severity, res.get("Target")))
+
+      print(f"扫描到许可证条目 {scanned} 条，禁止清单命中 {len(hits)} 条")
+      for pkg, name, sev, target in hits:
+          print(f"  ✗ {pkg}: {name} (severity={sev}) @ {target}")
+      if hits:
+          print("\nERROR: 存在禁止清单中的许可证。请替换依赖，或按流程提交例外单后在 LICENSE_ALLOW 登记。")
+          sys.exit(1)
+      print("OK: 未发现禁止清单中的许可证")
+      PY
+    - python /tmp/gate.py

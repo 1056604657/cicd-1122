@@ -1,0 +1,87 @@
+spec:
+  inputs:
+    action:
+      options: [stg, prod]
+      default: stg
+    source_pipeline:
+      type: string
+      default: "0"
+      regex: '^[0-9]{1,18}$'
+---
+# GitOps 仓库自身的门禁。
+#
+# 这个仓库是集群状态的唯一事实源，任何 MR 合并都会直接影响集群，
+# 所以它必须和业务仓库一样受流水线约束——否则"最后一关"只剩人工肉眼。
+#
+# 校验内容：
+#   1. 每个目录都能被 kustomize 正常渲染（防止指向不存在的 base 或写坏 patches）
+#   2. 结构完整（base + overlays/stg + overlays/prod）
+#   3. 生产 overlay 只认 digest，不认 tag
+#   4. 无明文 Secret、Namespace 带 Pod Security 标签
+#   5. 生产 Application 不得开启自动同步，生产 AppProject 必须有同步窗口
+#   6. 业务 AppProject 不得放开集群级资源
+#   7. releases/ 下的部署清单与测试报告符合 JSON Schema
+
+default:
+  tags:
+    - docker-general
+  timeout: 1h
+
+stages:
+  - validate
+  - promote
+
+variables:
+  KUSTOMIZE_VERSION: "5.3.0"
+
+validate-kustomize:
+  stage: validate
+  interruptible: true
+  image: alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+  before_script:
+    - apk add --no-cache git 'kustomize=~5.3' >/dev/null
+  script:
+    - |
+      set -e
+      FAIL=0
+      for d in apps/*/*/overlays/*/ platform/*/ argocd/projects/*/ argocd/applications/*/ argocd/bootstrap/*/; do
+        printf '%-44s' "$d"
+        if kustomize build "$d" --load-restrictor LoadRestrictionsNone >/dev/null 2>/tmp/err; then
+          echo OK
+        else
+          echo FAIL; sed 's/^/    /' /tmp/err; FAIL=1
+        fi
+      done
+      exit $FAIL
+
+validate-policy:
+  stage: validate
+  interruptible: true
+  image: python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+  before_script:
+    - pip install --no-cache-dir pyyaml jsonschema >/dev/null
+  script:
+    - python tools/validate_repo.py --root .
+    - python tools/test_promote.py
+
+promote:
+  tags: [docker-ops]
+  stage: promote
+  image: alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "trigger" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_REF_PROTECTED == "true"'
+  environment:
+    name: promotion
+  resource_group: gitops-writer
+  variables:
+    GIT_DEPTH: "0"
+  before_script:
+    - apk add --no-cache git python3 py3-yaml py3-jsonschema 'kustomize=~5.3' >/dev/null
+  script:
+    - python3 tools/promote.py "$[[ inputs.source_pipeline ]]" "$[[ inputs.action ]]"

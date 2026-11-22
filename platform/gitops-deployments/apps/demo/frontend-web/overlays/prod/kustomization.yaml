@@ -1,0 +1,30 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: frontend-web-prod
+
+resources:
+  - ../../base
+
+labels:
+  - pairs:
+      app.kubernetes.io/env: prod
+
+replicas:
+  - name: frontend-web
+    count: 3
+
+patches:
+  - target:
+      kind: Deployment
+      name: frontend-web
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/env/0/value
+        value: prod
+
+# 生产必须以 digest 固定，不允许 tag 漂移。
+# digest 由发布流程从 STG 已验证镜像晋级写入，严禁重新构建。
+images:
+  - name: host.docker.internal:5500/demo-projects-frontend-web
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000

@@ -1,0 +1,10 @@
+stages:
+  - validate        # 单元测试、代码风格
+  - quality         # 覆盖率门禁（读 validate 阶段产出的覆盖率报告）
+  - build           # 编译打包
+  - security        # 源码级安全：密钥、SAST、SonarQube、依赖漏洞、许可证、IaC
+  - package         # 构建并推送容器镜像
+  - image-security  # 镜像级安全：漏洞扫描、SBOM、签名
+  - gitops          # 写 GitOps 仓库（STG 自动）
+  - dast            # 对 STG 运行中的服务做动态扫描
+  - release         # 发布候选与生产晋级（tag，人工）

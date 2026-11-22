@@ -1,0 +1,7 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# PROD 层 Argo CD 的 app-of-apps 入口：每套实例只 apply 本目录。
+resources:
+  - ../../projects/prod
+  - ../../applications/prod

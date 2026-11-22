@@ -1,0 +1,37 @@
+# 调用甲方 GitOps 项目。业务侧只持有触发凭证及只读状态查询凭证。
+stg-promotion:
+  stage: gitops
+  interruptible: false
+  timeout: 2h
+  tags: [docker-notify]
+  image: alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc
+  environment:
+    name: "stg/$APP_NAME"
+  variables:
+    GIT_STRATEGY: none
+    PROMOTION_ACTION: stg
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+  before_script:
+    - apk add --no-cache curl jq >/dev/null
+  script:
+    - |
+      set -eu
+      : "${OPS_PROJECT_ID:?}" "${OPS_TRIGGER_TOKEN:?}" "${OPS_STATUS_TOKEN:?}"
+      api="$CI_API_V4_URL/projects/$OPS_PROJECT_ID"
+      id=$(curl --silent --show-error --fail --request POST \
+        --form-string "token=$OPS_TRIGGER_TOKEN" --form-string "ref=main" \
+        --form-string "inputs[action]=$PROMOTION_ACTION" \
+        --form-string "inputs[source_pipeline]=$CI_PIPELINE_ID" \
+        "$api/trigger/pipeline" | jq -er '.id | numbers')
+      echo "GitOps pipeline $id"
+      while true; do
+        status=$(curl --silent --show-error --fail --retry 3 \
+          --header "PRIVATE-TOKEN: $OPS_STATUS_TOKEN" \
+          "$api/pipelines/$id" | jq -er '.status')
+        case "$status" in
+          success) exit 0 ;;
+          created|waiting_for_resource|preparing|pending|running|scheduled) sleep 10 ;;
+          *) echo "GitOps pipeline $id: $status"; exit 1 ;;
+        esac
+      done

@@ -1,0 +1,31 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: go-api-prod
+
+resources:
+  - ../../base
+
+labels:
+  - pairs:
+      app.kubernetes.io/env: prod
+
+replicas:
+  - name: go-api
+    count: 2
+
+patches:
+  - target:
+      kind: Deployment
+      name: go-api
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/env/0/value
+        value: prod
+
+# 生产必须以 digest 固定，不允许 tag 漂移。
+# digest 由发布流程从 STG 已验证镜像晋级写入，严禁重新构建。
+images:
+- digest: sha256:c68391f481cda85137fe03e4f3ba282b4e830d33029bf7ff5ed9f13b41427273
+  name: host.docker.internal:5500/demo-projects-go-api
+  newName: host.docker.internal:5500/demo-projects-go-api

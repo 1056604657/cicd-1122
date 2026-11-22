@@ -1,0 +1,13 @@
+{
+  "name": "frontend-web",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "c8 --reporter=lcov --reporter=text node --test",
+    "build": "mkdir -p dist && cp -R src/. dist/"
+  },
+  "devDependencies": {
+    "c8": "^10.1.2"
+  }
+}

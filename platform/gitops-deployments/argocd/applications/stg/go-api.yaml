@@ -1,0 +1,33 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: go-api-stg
+  namespace: argocd
+  labels:
+    platform.modernkemo/project: demo
+    platform.modernkemo/app: go-api
+    platform.modernkemo/env: stg
+  annotations:
+    platform.modernkemo/owner: platform-team
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: demo-go-api-stg
+  source:
+    repoURL: https://gitlab.internal/platform/gitops-deployments.git
+    targetRevision: main
+    path: apps/demo/go-api/overlays/stg
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: go-api-stg
+  revisionHistoryLimit: 10
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 3
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m

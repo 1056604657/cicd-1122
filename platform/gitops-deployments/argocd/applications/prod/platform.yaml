@@ -1,0 +1,21 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform-namespaces-prod
+  namespace: argocd
+  labels:
+    platform.modernkemo/project: platform
+    platform.modernkemo/env: prod
+  annotations:
+    platform.modernkemo/owner: platform-team
+spec:
+  project: platform-prod
+  source:
+    repoURL: https://gitlab.internal/platform/gitops-deployments.git
+    targetRevision: main
+    path: platform/prod
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  revisionHistoryLimit: 10
+  syncPolicy: {}

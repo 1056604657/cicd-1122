@@ -1,0 +1,4 @@
+node_modules/
+dist/
+.image-digest
+image.env

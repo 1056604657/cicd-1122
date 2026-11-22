@@ -1,0 +1,129 @@
+# IaC 与容器构建文件的安全基线检查。
+#
+# 供应商最容易绕过评审的两个地方是 Dockerfile 和清单文件：
+# 用 root 跑容器、用 latest 标签、ADD 远程 URL、把密钥写进 ENV。
+# 这些都能用纯 shell 判定，不依赖外部工具，内网离线可用。
+
+# 1) Dockerfile 策略检查（自动执行，纯 shell，无外部依赖）
+dockerfile-policy:
+  stage: security
+  interruptible: true
+  image: alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - if: '$CI_COMMIT_TAG'
+  script:
+    - |
+      set -e
+      if [ ! -f Dockerfile ]; then
+        echo "ERROR: 缺少 Dockerfile"; exit 1
+      fi
+      FAIL=0
+      fail() { echo "  ✗ $1"; FAIL=1; }
+
+      # a) 每条 FROM 必须按 digest 固定，且写全限定仓库名
+      #    （短名 + digest 会被 buildah 的 unqualified-search 解析到其它仓库）
+      while IFS= read -r line; do
+        ref=$(echo "$line" | awk '{print $2}')
+        case "$ref" in
+          *"@sha256:"*) ;;
+          *) fail "FROM 未按 digest 固定：$ref" ;;
+        esac
+        case "$ref" in
+          */*@sha256:*) ;;
+          *@sha256:*) fail "FROM 未写全限定仓库名（应形如 docker.io/library/xxx@sha256:…）：$ref" ;;
+        esac
+      done <<EOF
+      $(grep -i '^[[:space:]]*FROM ' Dockerfile || true)
+      EOF
+
+      # b) 必须显式声明非 root USER。
+      #    不写 USER 时镜像默认就是 root——K8s 的 runAsNonRoot=true 会在启动时直接拒绝，
+      #    这个错误只在部署时才暴露，所以要在构建前就拦下来。
+      if ! grep -Eiq '^[[:space:]]*USER[[:space:]]' Dockerfile; then
+        fail "Dockerfile 未声明 USER，默认以 root 运行"
+      elif grep -Eiq '^[[:space:]]*USER[[:space:]]+(root|0)[[:space:]]*$' Dockerfile; then
+        fail "Dockerfile 显式使用 USER root"
+      fi
+
+      # c) 禁止 latest 与浮动 tag（FROM 已有 digest 校验，这里兜住 RUN 里的拉取）
+      if grep -Eiq '^[[:space:]]*FROM[[:space:]]+[^[:space:]]+:latest' Dockerfile; then
+        fail "FROM 使用了 latest 标签"
+      fi
+
+      # d) 禁止 ADD 远程 URL（不可校验来源，且不会解压校验）
+      if grep -Eiq '^[[:space:]]*ADD[[:space:]]+https?://' Dockerfile; then
+        fail "使用 ADD 拉取远程 URL，应改为 COPY + 校验和，或走镜像仓库"
+      fi
+
+      # e) 禁止把敏感信息写进 ENV/ARG 默认值
+      if grep -Eiq '^[[:space:]]*(ENV|ARG)[[:space:]]+.*(PASSWORD|SECRET|TOKEN|PRIVATE_KEY|ACCESS_KEY)=' Dockerfile; then
+        fail "Dockerfile 中出现疑似密钥的 ENV/ARG 默认值"
+      fi
+
+      # f) 镜像构建阶段不得编译。
+      #    镜像里必须装「CI build 阶段产出、且已经被 SAST/依赖扫描/许可证判定覆盖」的那份产物。
+      #    在 RUN 里重新 mvn/go build/npm build，等于把「被扫描的代码」和「装进镜像的东西」
+      #    拆成两次独立构建，扫描结论不再对镜像成立，SBOM 也对不上镜像内容。
+      if grep -Eiq '^[[:space:]]*RUN[[:space:]].*(mvn |gradle|go build|npm (ci|install|run build)|yarn |pnpm |python -m build|pip wheel|pip install[[:space:]]+(-e[[:space:]]+)?\.)' Dockerfile; then
+        fail "RUN 中执行了编译/打包命令：镜像只允许打包 CI build 阶段的产出制品"
+      fi
+
+      # g) 至少要有一条从构建上下文拷入的 COPY。
+      #    全是 COPY --from 说明镜像里没有任何本仓库产物，多半是模板套错或产物路径写错。
+      LOCAL_COPY=$(grep -Ei '^[[:space:]]*COPY[[:space:]]' Dockerfile | grep -Eiv -- '--from=' | wc -l || true)
+      if [ "$LOCAL_COPY" -eq 0 ]; then
+        fail "Dockerfile 没有从构建上下文拷入任何产物（COPY 全部来自 --from 或没有 COPY）"
+      fi
+
+      # h) 建议性检查：必须声明 EXPOSE（缺了不阻断，仅提示）
+      grep -Eiq '^[[:space:]]*EXPOSE[[:space:]]' Dockerfile || echo "  · 提示：未声明 EXPOSE"
+
+      # i) 建议性检查：运行镜像里 apt/apk 装包会让 trivy 的镜像扫描之外多出未受管控依赖
+      if grep -Eiq '^[[:space:]]*RUN[[:space:]].*(apt-get|apk add|yum install)' Dockerfile; then
+        echo "  · 提示：运行镜像在构建时安装系统包，这些依赖不在 SCA 覆盖范围内，需单独说明"
+      fi
+
+      if [ "$FAIL" -eq 1 ]; then
+        echo "ERROR: Dockerfile 不符合安全基线"
+        exit 1
+      fi
+      echo "OK: Dockerfile 通过安全基线检查"
+  artifacts:
+    when: always
+    paths:
+      - Dockerfile
+    expire_in: 30 days
+
+# 2) 清单 / IaC 扫描（hadolint + kubeconform）
+#    需要 hadolint 与 kubeconform 工具镜像/二进制；内网应把二者放入内部仓库。
+#    未就绪时本作业会在拉取阶段失败，因此由项目侧决定启用时机。
+iac-scan:
+  stage: security
+  interruptible: true
+  image:
+    name: ghcr.io/yannh/kubeconform:v0.6.7@sha256:0925177fb05b44ce18574076141b5c3d83235e1904d3f952182ac99ddc45762c
+    entrypoint: [""]
+  allow_failure: false
+  rules:
+    # 仓库里存在 Kubernetes 清单时才跑；纯应用仓库跳过
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      exists:
+        - "k8s/**/*.yaml"
+        - "deploy/**/*.yaml"
+        - "manifests/**/*.yaml"
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+      exists:
+        - "k8s/**/*.yaml"
+        - "deploy/**/*.yaml"
+        - "manifests/**/*.yaml"
+    - when: never
+  script:
+    - |
+      set -e
+      DIRS=""
+      for d in k8s deploy manifests; do [ -d "$d" ] && DIRS="$DIRS $d"; done
+      if [ -z "$DIRS" ]; then echo "未发现清单目录，跳过"; exit 0; fi
+      # strict：未知字段、重复键都算错误，防止供应商塞入 Argo CD 不认的字段
+      kubeconform -strict -summary -ignore-missing-schemas $DIRS

@@ -1,0 +1,30 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: java-api-stg
+
+resources:
+- ../../base
+
+labels:
+- pairs:
+    app.kubernetes.io/env: stg
+
+replicas:
+- count: 1
+  name: java-api
+
+patches:
+- patch: |-
+    - op: replace
+      path: /spec/template/spec/containers/0/env/0/value
+      value: stg
+  target:
+    kind: Deployment
+    name: java-api
+
+# STG 允许按 tag 晋级：由 CI 流水线在镜像推送成功后自动改写 newTag。
+images:
+- name: host.docker.internal:5500/demo-projects-java-api
+  newName: host.docker.internal:5500/demo-projects-java-api
+  newTag: 212e134c
