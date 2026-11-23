@@ -22,7 +22,7 @@
                                            │ ②镜像（按 digest）
                                            ▼
                                     ┌──────────────┐
-                                    │ 中央镜像仓库  │ ← 唯一发布事实源
+                                    │ 本项目的 CCR  │ ← 接入时选定百度云账号及仓库
                                     └──────┬───────┘
                                            │ ③写 overlay
                                            ▼
@@ -35,7 +35,7 @@
 四条链路的边界是这套方案的核心：
 
 1. **CI 不持有任何集群凭证**，不执行 `kubectl apply`。它只产出镜像、扫描报告、SBOM 和 GitOps 变更。
-2. **镜像仓库是唯一事实源**。部署描述里写的是 digest，不是 tag，生产不重新构建。
+2. **每个业务项目推送到自己配置的百度云 CCR 仓库**。STG 和 PROD 使用这个项目已验证的同一镜像 digest。
 3. **GitOps 仓库是部署事实源**。集群里被人手工改过什么，Argo CD 都会显示为 `OutOfSync`。
 4. **生产变更必经人手**：部署清单 MR → 甲方审批 → 发布窗口 → 人工 Sync。
 
@@ -49,7 +49,7 @@
 | D02 | 多语言怎么支持 | Runner 不按语言拆，**构建镜像**按语言拆；统一 Docker executor |
 | D03 | 怎么统一不同供应商 | 唯一模板仓库 + 固定版本 `include`；禁止供应商复制一套私有流水线 |
 | D04 | CI 与 CD 边界 | CI 不碰集群，只产出制品与 GitOps 变更；部署归 Argo CD |
-| D05 | 镜像放哪 | 中央镜像库为唯一事实源，按项目隔离命名空间与权限 |
+| D05 | 镜像放哪 | 按项目登记百度云账号、CCR 实例和仓库路径。不同项目可以使用不同账号、不同实例；同一实例内也按项目授权 |
 | D06 | GitOps 仓库放哪 | 与业务代码同在北京 GitLab；Argo CD 只读拉取 |
 | D07 | Argo CD 几套 | **两套**：`argocd-stg`、`argocd-prod`，按环境拆分，不按项目拆 |
 | D08 | Argo CD 放哪个账号 | 优先统一运维账号；PROD 实例独立命名空间、节点池、RBAC、凭证 |
@@ -201,7 +201,7 @@
 | # | 准备什么 | 具体要求 |
 |---|---|---|
 | 1 | 模板仓库打标签 | `examples` 里的 `ref` 必须指向真实存在的**受保护标签**，否则流水线 config error |
-| 2 | 组级 CI 变量 | `REGISTRY_HOST`、`REGISTRY_TLS_VERIFY`、`REGISTRY_USER`、`REGISTRY_PASSWORD`、`OPS_PROJECT_ID`、项目专用 `OPS_TRIGGER_TOKEN`、只读 `OPS_STATUS_TOKEN`。令牌 masked + protected；写令牌只放甲方 GitOps 项目。接入步骤见该仓 README |
+| 2 | 业务项目 CI 变量 | `REGISTRY_HOST`、`REGISTRY_TLS_VERIFY`、`REGISTRY_USER`、`REGISTRY_PASSWORD`、`OPS_PROJECT_ID`、项目专用 `OPS_TRIGGER_TOKEN`、只读 `OPS_STATUS_TOKEN`。令牌 masked + protected；写令牌只放甲方 GitOps 项目。接入步骤见该仓 README |
 | 3 | Runner 隔离 | 普通测试和扫描用非特权 `docker-general`，通知用非特权 `docker-notify`。构建固定使用独立主机的 `docker-build`。甲方 GitOps 使用项目专属非特权 `docker-ops`，独立主机、独立并发容量。构建池限制授权项目和受保护引用，关闭无标签调度。 |
 | 4 | Argo CD 两套 | 每套都要配：GitOps 仓库凭证、目标集群注册、根 Application（指向 `argocd/bootstrap/<env>`） |
 | 5 | 镜像仓库权限 | 构建、扫描、SBOM 四处都用同一组凭据 |
@@ -218,18 +218,9 @@
 
 ### 一个容易踩的坑：镜像名有两处，必须一致
 
-CI 里 `IMAGE_NAME` 是 `$CI_PROJECT_PATH_SLUG`，甲方 GitOps 晋级作业核对构建产物后执行类似操作：
+每个业务仓在 GitLab 项目变量中配置自己的 `REGISTRY_HOST`（CCR 登录域名）和仓库凭据。构建、扫描和晋级使用完整镜像名 `<REGISTRY_HOST>/<IMAGE_NAME>`。默认 `IMAGE_NAME=$CI_PROJECT_PATH_SLUG`；若项目分配的 CCR 路径是 `ccs-local/booking-api`，将项目变量 `IMAGE_NAME` 设为这个相对路径。
 
-```bash
-kustomize edit set image "<REGISTRY_HOST>/<slug>=<REGISTRY_HOST>/<slug>@<digest>"
-```
-
-左边这个 `<REGISTRY_HOST>/<slug>` 必须和 overlay 里 `images[].name` **逐字符相同**，否则
-kustomize 匹配不上，会**新增**一条 image 记录，而 Deployment 引用的还是旧名字——
-表现是流水线绿、GitOps 提交也有，但 STG 镜像无法正确更新。
-
-所以改镜像仓库地址时，`defaults.yml` 的 `REGISTRY_HOST` 和 `apps/*/*/overlays/*/kustomization.yaml`
-里的镜像名要**一起改**。交付包里这两处都是 `harbor.invalid`，一眼能看出没配过。
+接入时核对 CI 构建出的完整镜像名、GitOps base 的 Deployment 镜像以及 STG/PROD overlay 的镜像配置。生成器默认使用项目路径 slug，使用自定义 CCR 路径时在同一接入 MR 中对齐这些文件。更换某个项目的 CCR 时，只更新该项目配置和集群拉取授权。
 
 第 6 条是最容易出事的：这三项配错时流水线照样"绿"，只是绿灯不作数。改完故意让一个扫描失败一次，确认流水线真的会红、且 STG 不更新。
 
@@ -243,7 +234,7 @@ kustomize 匹配不上，会**新增**一条 image 记录，而 Deployment 引�
 2. "业务代码不上云"的准确边界：GitOps 仓库内容算不算、Argo CD 的云端缓存算不算。
 3. Argo CD 放统一运维账号还是 CCS Local 的 plf 账号。
 4. 是否一账号一集群；STG 与 PROD 是否在不同百度云账号。
-5. 镜像仓库：用统一运维账号的中央库，还是各业务账号各建一个。
+5. 各项目实际使用哪个百度云账号、CCR 实例和仓库路径，以及两套 CCE 各自的只读拉取身份。
 6. Nexus 何时就位（决定依赖源、Trivy DB、semgrep 规则集能否内网化）。
 7. SonarQube 是否已有实例、由谁维护。
 8. GitLab CE 版本与是否可升级（影响 API 能力）。

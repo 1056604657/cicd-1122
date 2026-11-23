@@ -1,6 +1,6 @@
 # 归档清单
 
-- 生成时间：2026-11-23 14:39:27 +0800
+- 生成时间：2026-11-23 18:28:38 +0800
 - 来源目录：`/Users/babyyy/工作/Hyundai/cicd-workbuddy`
 - 文件总数：131（含本 README/MANIFEST/SNAPSHOT 之外由 7 个仓库复制的文件）
 
@@ -8,7 +8,7 @@
 |---|---|---|---|---:|---|---|
 | `platform/cicd-templates` | `main` | `ae09fb58a40b` | Merge branch 'fix/optional-stg-dast' into 'main' | 27 | 是 | 流水线模板：9 阶段、Java/Python/Go/Node 构建、质量门禁、镜像构建、STG/PROD 晋级作业 |
 | `platform/gitops-deployments` | `main` | `0772db715fcf` | Merge branch 'fix/register-gitops-app' into 'main' | 67 | 是 | GitOps 事实源：Kustomize base/overlay、Argo CD Application/AppProject、发布清单、晋级脚本 |
-| `platform/platform-plan` | `docs/idc-gitlab-deployment` | `b10f124ab3ce` | 新增机房 GitLab CI/CD 部署手册 | 3 | 是 | 总方案文档：架构、权限、发布流程、已知缺口和待确认事项 |
+| `platform/platform-plan` | `main` | `d0a240b693bf` | Merge branch 'docs/idc-gitlab-deployment' into 'main' | 3 | 是 | 总方案文档：架构、权限、发布流程、已知缺口和待确认事项 |
 | `demo-projects/java-api` | `main` | `e7b00da46f2b` | Merge branch 'fix/optional-stg-dast' into 'main' | 7 | 是 | Java/Maven 示例业务仓库 |
 | `demo-projects/python-api` | `main` | `4ff135528f62` | Merge branch 'fix/optional-stg-dast' into 'main' | 9 | 是 | Python 示例业务仓库 |
 | `demo-projects/go-api` | `main` | `247ecbec14d3` | Merge branch 'fix/optional-stg-dast' into 'main' | 8 | 是 | Go 示例业务仓库 |

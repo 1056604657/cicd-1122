@@ -19,12 +19,12 @@
 | 需要落定 | CCS Local 试点填写内容 |
 |---|---|
 | GitLab | 内网 HTTPS 域名、CE 版本、默认分支、内部 CA、管理员。北京迁上海时优先沿用稳定域名 |
-| 业务与制品 | 供应商、业务项目完整路径、应用唯一名、语言、现有构建命令、镜像仓库域名及实际仓库路径 |
+| 业务与制品 | 供应商、业务项目完整路径、应用唯一名、语言、现有构建命令、本项目的百度云账号、CCR 实例、登录域名及实际仓库路径 |
 | STG / PROD | 各自百度云账号、CCE API 地址、命名空间、集群管理人；记录已有服务、镜像 digest 和现有部署工具 |
 | 控制面 | 两套 Argo CD 的位置、命名空间、访问地址、管理人。已有运维账号实例可作为其中一套评估 |
 | 发布 | 供应商测试负责人、甲方发布经理、正常窗口/冻结期、紧急窗口批准人、回滚目标 |
 
-**本文采用的实施选择**：Runner 放在机房，源代码在机房检出。镜像可以放运维账号中央库，也可按业务账号分库；首期让同一应用的 STG 和 PROD 拉取**同一仓库同一 digest**。当前晋级脚本没有跨库复制步骤。如果采用云端镜像库，先确认允许代码制品上云的边界，尤其是镜像内的 Python 源文件和前端静态文件。Nexus 可后装，首期可以用已有内网代理或批准的镜像和依赖源。
+**本文采用的实施选择**：Runner 放在机房，源代码在机房检出。镜像按业务项目推送到接入表登记的百度云账号和 CCR 仓库。CCS Local 可以使用账号 A 的 CCR，另一个项目可以使用账号 B 的 CCR；两者共用流水线模板，各自配置域名、路径和凭据。同一应用的 STG 和 PROD 拉取**该项目仓库的同一 digest**。当前晋级脚本没有跨库复制步骤。如果采用云端镜像库，先确认允许代码制品上云的边界，尤其是镜像内的 Python 源文件和前端静态文件。Nexus 可后装，首期可以用已有内网代理或批准的镜像和依赖源。
 
 **甲方先安排三项交付**：GitLab 管理员提供 CE 版本、内部域名和建组权限；机房运维提供三台 VM 或等效隔离资源、依赖源和网络连通；云平台负责人提供两套 CCE 的目标地址、镜像库与 Argo CD 的授权联系人。可以先建仓和 Runner，等 STG 试点验收后再安排生产窗口。
 
@@ -81,11 +81,11 @@ git ls-remote idc refs/heads/main refs/tags/v1.0.19 'refs/tags/v1.0.19^{}'
 
 **从零准备外部服务**：
 
-1. 镜像库管理员在选定的运维或业务账号创建私有仓库，登记实际路径、可写的 CI 身份和只拉取的 STG/PROD 身份。给发布和回滚用的 digest 设置保留策略。试点时验证从机房推、STG 拉、PROD 拉的权限，保留 digest 比对记录。
+1. 镜像库管理员在该项目登记的百度云账号和 CCR 实例内创建或确认私有仓库，登记实际路径、可写的 CI 身份和只拉取的 STG/PROD 身份。给发布和回滚用的 digest 设置保留策略。试点时验证从机房推、STG 拉、PROD 拉的权限，保留 digest 比对记录。
 2. 安全团队部署或提供机房可达的 SonarQube，建立试点项目、质量门和项目级分析身份。Gitleaks、Semgrep、Trivy 由作业镜像执行，无需分别部署常驻扫描服务器；准备好规则包、漏洞库和更新负责人。真实 Sonar、SAST、SCA、license、镜像扫描、SBOM 的报告分别验收。
 3. 网络团队为 runner 主机、作业容器、Argo CD 和 CCE 节点分别验证上表连通性。只给管理机开通线路，作业容器仍可能因 DNS、证书链或代理失败。规划北京迁上海时，在切换 DNS 前从管理 CCE 试拉 GitOps 仓，并从新机房试调 STG Argo API。
 
-当前工具镜像直接引用多个外部 registry 并固定 digest；`REGISTRY_HOST` 只改变业务镜像目的地。无公网时须为 Docker、Buildah、Runner helper 和扫描工具分别提供内网来源，预置 apk/pip 等依赖。可用经批准的保留 digest 的镜像代理，修改模板镜像名则发新标签。默认镜像路径是 `<REGISTRY_HOST>/<CI_PROJECT_PATH_SLUG>`；若企业库强制额外的租户/命名空间前缀，先验证登录地址、build、scan 与生成器的 `images[].name` 一致，必要时统一适配后再推首个镜像。
+当前工具镜像直接引用多个外部 registry 并固定 digest；`REGISTRY_HOST` 只改变业务镜像目的地。无公网时须为 Docker、Buildah、Runner helper 和扫描工具分别提供内网来源，预置 apk/pip 等依赖。可用经批准的保留 digest 的镜像代理，修改模板镜像名则发新标签。默认镜像路径是 `<REGISTRY_HOST>/<CI_PROJECT_PATH_SLUG>`。若 CCR 分配了命名空间或自定义仓库名，把业务项目变量 `IMAGE_NAME` 设为相对路径，例如 `ccs-local/booking-api`。登录域名与路径分别填写。
 
 ## 4　配置凭据和变量
 
@@ -95,7 +95,7 @@ git ls-remote idc refs/heads/main refs/tags/v1.0.19 'refs/tags/v1.0.19^{}'
 |---|---|---|
 | 每个业务项目 | `OPS_PROJECT_ID`、`OPS_TRIGGER_TOKEN` | ID 为机房 GitOps 项目数字 ID。在 GitOps 项目按业务仓设一个甲方机器人，用这个身份创建 **pipeline trigger token**，其权限要能触发受保护的 main。登记机器人的实际 GitLab 登录名；不同项目不共用触发身份 |
 | 每个业务项目 | `OPS_STATUS_TOKEN` | GitOps 范围的只读 API 身份，例如 Reporter + `read_api`，只用于轮询下游流水线。注意其可读范围是项目级 |
-| 业务项目或对应隔离子组 | `REGISTRY_HOST`、`REGISTRY_TLS_VERIFY=true`、`REGISTRY_USER`、`REGISTRY_PASSWORD` | 业务项目自己的仓库路径权限，构建推送、镜像扫描和 SBOM 读取。不要在多个供应商间共享通用写账户 |
+| 每个业务项目 | `REGISTRY_HOST`、`IMAGE_NAME`（自定义路径时）、`REGISTRY_TLS_VERIFY=true`、`REGISTRY_USER`、`REGISTRY_PASSWORD` | 填该项目 CCR 域名、仓库路径和专用凭据。CI 只对本项目仓库推送和读取，STG/PROD CCE 各自配置对该仓库的只读拉取权限 |
 | 业务项目 | `SONAR_HOST_URL`、`SONAR_TOKEN`；按需 `SAST_RULESET`、`TRIVY_DB_REPOSITORY`、`DAST_TARGET_URL` | Sonar 使用单项目分析身份。后几个变量按内网规则库、漏洞库和 STG 地址填写 |
 | 只在 GitOps 项目，环境范围 `promotion` | `GITOPS_TOKEN` | 专用机器人，对本仓 `write_repository`；按分支规则能写 STG 主干、凭证及生产候选分支，通过 Git push options 创建 MR |
 | 同上 | `PROMOTION_READ_TOKEN` | 甲方专用 `read_api` 身份；对已登记的业务仓有读取流水线、job、artifact 的权限，同时可读本 GitOps 仓 MR。单一业务项目的 project token 通常不覆盖这些项目 |
@@ -112,17 +112,17 @@ git ls-remote idc refs/heads/main refs/tags/v1.0.19 'refs/tags/v1.0.19^{}'
 
 1. 通过企业批准的版本安装 Argo CD（Helm 或发行清单），保存安装版本、values、恢复方法，配置内网 HTTPS 和管理员/发布人员登录。已有实例先核实其管理范围。为两个实例添加机房 GitOps 仓库只读凭据和 CA。分别登记目标 STG/PROD API server，记录 Argo CD 返回的实际 server 字符串。限制集群凭据和 AppProject 到所需资源；业务项目管理 Deployment/Service/ConfigMap，命名空间和配额由平台 Application 管理。只给甲方发布角色目标 PROD Application 的 Sync 权限。[Argo CD 安装及集群登记](https://argo-cd.readthedocs.io/en/stable/getting_started/)
 2. **在连接 root 前**克隆机房 GitOps 仓，建接入分支。原样的两个 `argocd/bootstrap/<env>` 各渲染 **5 个 Application**，含四个 demo 和一个默认平台应用。保留生成器使用的 demo 文件及平台样板，先生成真实应用，再编辑各环境 `argocd/applications/<env>/kustomization.yaml` 的启用列表，只列试点的业务和平台 Application；在 `argocd/projects/<env>/kustomization.yaml` 保留对应项目，保留自检使用的 `platform.yaml` 项目基线并审核其权限。清理 `promotion-sources.json` 中示例机器人的授权。后续每个供应商走同样的接入 MR。
-3. 在 GitOps 仓根目录运行以下生成命令（示例值全部替换，尤其是两个真实 API 地址）。生成器需要 Python 3、PyYAML；测试还需 jsonschema 和 kustomize 或带 kustomize 的 kubectl。
+3. 在 GitOps 仓根目录运行以下生成命令（把示例 CCR 域名和两个 CCE API 地址替换为接入表中的值）。生成器需要 Python 3、PyYAML；测试还需 jsonschema 和 kustomize 或带 kustomize 的 kubectl。
 
 ```bash
 python3 tools/add_app.py --project-key ccs-local --app booking-api --language java \
   --gitlab-project-path vendors/ccs/booking-api --robot promote-booking \
-  --registry-host registry.example.internal \
+  --registry-host ccr-project-a.example.internal \
   --server-stg https://api.stg.example.internal --server-prod https://api.prod.example.internal \
   --gitops-url https://gitlab.example.internal/platform/gitops-deployments.git
 ```
 
-4. 按第 2 步收敛启用列表。生成器自检目前固定用测试业务名 `order-api`、机器人 `order-bot` 和仓库路径 `vendors/acme/orders`。真实试点若恰好重名，先让自检使用独立测试数据，否则 GitOps MR 会因测试夹具冲突而失败。以此例，每环境 applications 只列 `booking-api.yaml`、`platform-booking-api.yaml`。检查生成的端口、探针、UID、配置/密钥挂载、Service、ingress、依赖和 NetworkPolicy 是否符合真实服务；样板的网络策略限制入站和出站，数据库、消息队列、入口网关须按实需放行。已有服务先与当前部署做资源名、selector、namespace、owner 和 prune 差异检查，明确接管或并行切流，再让原部署工具交接写权限。生成器要求应用名在此 GitOps 仓唯一。
+4. 如果在业务项目变量中配置了自定义 `IMAGE_NAME`，生成后将 base 中容器的 `image`、两套 overlay 的 `images[].name` 和已有的 `newName` 对齐为该项目的完整 CCR 镜像名，保留环境的 digest 字段。分别用 `kubectl kustomize` 渲染，核对 Deployment 引用的域名和路径。按第 2 步收敛启用列表。生成器自检目前固定用测试业务名 `order-api`、机器人 `order-bot` 和仓库路径 `vendors/acme/orders`。真实试点若恰好重名，先让自检使用独立测试数据，否则 GitOps MR 会因测试夹具冲突而失败。以此例，每环境 applications 只列 `booking-api.yaml`、`platform-booking-api.yaml`。检查生成的端口、探针、UID、配置/密钥挂载、Service、ingress、依赖和 NetworkPolicy 是否符合真实服务；样板的网络策略限制入站和出站，数据库、消息队列、入口网关须按实需放行。已有服务先与当前部署做资源名、selector、namespace、owner 和 prune 差异检查，明确接管或并行切流，再让原部署工具交接写权限。生成器要求应用名在此 GitOps 仓唯一。
 5. 合并前对 STG 和 PROD 分别渲染。root 渲染的是 Application 与 AppProject 声明，还要单独渲染每个 Application 指向的目录。确认 repoURL、server、namespace、实际镜像路径、生产同步策略和窗口。初始全零 digest 是**未发版占位**；Argo CD 不会自动拒绝同步它。已有服务先写入可核实的现网基线 digest；全新 STG 先建平台资产，首个真实 digest 写入后再放行业务 Application 的首次同步。若本轮错过 10 分钟观察时间，在版本仍是主干头时重试 STG 作业。生产占位不得点 Sync。
 
 ```bash
