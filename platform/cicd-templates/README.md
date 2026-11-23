@@ -22,9 +22,9 @@ security/license-scan.yml trivy 许可证收集 + 独立判定作业（禁止清
 security/iac-scan.yml     Dockerfile 安全基线（FROM/USER/编译/密钥 9 条硬规则）+ kubeconform 清单校验
 security/dast.yml         OWASP ZAP baseline 动态扫描（先探测 STG 就绪）
 container/build-image.yml buildah 无守护进程构建 + 推送 + 记录 digest
-container/scan-image.yml  镜像漏洞扫描
+container/scan-image.yml  按 build-image 归档的 digest 扫描镜像
 container/sign-image.yml  镜像签名（待接入密钥管理）
-container/sbom.yml        Trivy 对最终镜像生成 CycloneDX SBOM，随制品留存 365 天
+container/sbom.yml        Trivy 按同一 digest 对最终镜像生成 CycloneDX SBOM，随制品留存 365 天
 gitops/stg-promotion.yml  通知甲方按 digest 部署 STG，并等待健康凭证归档
 gitops/release-candidate.yml 历史主干流水线的手动窗口申请
 gitops/prod-promotion.yml 自动通知甲方作业创建生产 MR
@@ -39,7 +39,7 @@ tools/check_standard.py    校验业务仓库有没有偏离本仓库的约定
 ```yaml
 include:
   - project: platform/cicd-templates
-    ref: v1.0.17
+    ref: v1.0.19
     file:
       - /defaults.yml
       - /workflow.yml
@@ -149,7 +149,7 @@ Node `dist/`。Dockerfile 用**固定文件名**而不是通配符——约定�
 
 ## 质量门禁
 
-安全扫描作业在标准流水线中**始终自动执行，命中即阻断**，业务仓库无权关闭。
+源码和镜像的必需安全门禁自动执行，命中阈值会阻断晋级。STG 部署成功后可手动执行 DAST。扫描结果供发布评审查看，未执行或扫描失败均不自动阻断生产申请。
 可按需调整的只有阈值和规则集来源，且调整权限归平台/安全角色。
 
 | 变量 | 默认值 | 说明 |

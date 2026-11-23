@@ -2,10 +2,10 @@
 
 本仓库是把本地 GitLab 中的 7 个仓库做成一个**只读查看用归档快照**，便于在没有本地 GitLab 网络时查看代码。
 
-- 生成时间：2026-11-22 22:43:09 +0800
+- 生成时间：2026-11-23 14:39:27 +0800
 - 来源目录：`/Users/babyyy/工作/Hyundai/cicd-workbuddy`
-- 当前所有仓库分支：`release/verified-stg-history`
-- 模板引用：demo-projects/java-api: v1.0.17, demo-projects/python-api: v1.0.17, demo-projects/go-api: v1.0.17, demo-projects/frontend-web: v1.0.17
+- 当前各仓库分支：`docs/idc-gitlab-deployment`、`main`
+- 模板引用：demo-projects/java-api: v1.0.19, demo-projects/python-api: v1.0.19, demo-projects/go-api: v1.0.19, demo-projects/frontend-web: v1.0.19
 - 归档方式：仅复制每个仓库中 Git 跟踪的文件；**不包含 `.git` 目录，也不包含本地 GitLab root 凭据**。
 
 ## 目录结构

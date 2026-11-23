@@ -11,6 +11,7 @@
 # 代价：trivy 的 cataloger 覆盖度不如 syft（不含部分语言生态的深层依赖），
 # 需要更强覆盖时再引入 syft，但要自带 shell 的自建镜像。
 sbom:
+  extends: .built-image-input
   stage: image-security
   interruptible: true
   image:
@@ -18,7 +19,6 @@ sbom:
     entrypoint: [""]
   rules:
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
-    - if: '$CI_COMMIT_TAG'
   variables:
     TRIVY_USERNAME: "$REGISTRY_USER"
     TRIVY_PASSWORD: "$REGISTRY_PASSWORD"
@@ -30,7 +30,7 @@ sbom:
       if [ "$REGISTRY_TLS_VERIFY" = "false" ]; then INSECURE=true; fi
       trivy image --quiet --insecure="$INSECURE" \
         --format cyclonedx --output sbom.json \
-        "$REGISTRY_HOST/$IMAGE_NAME:$IMAGE_TAG"
+        "$image_ref"
     - |
       set -eu
       # 空文件或非法 JSON 都算失败：SBOM 存在的意义是可被下游消费，不是占个文件名

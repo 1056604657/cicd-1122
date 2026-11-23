@@ -79,3 +79,19 @@ build-image:
       - .image-digest
       - image.env
     expire_in: 90 days
+
+# 两个镜像检查只读取本次 build-image 归档的完整引用。
+.built-image-input:
+  dependencies: [build-image]
+  before_script:
+    - |
+      IFS= read -r image_line < image.env || exit 1
+      image_ref=${image_line#IMAGE_REF=}
+      digest=${image_ref##*@sha256:}
+      case "$digest" in
+        *[!0-9a-f]*|'') exit 1 ;;
+      esac
+      if [ "${#digest}" -ne 64 ] || [ "$image_line" != "IMAGE_REF=$REGISTRY_HOST/$IMAGE_NAME@sha256:$digest" ]; then
+        echo "ERROR: 构建产物中的镜像引用无效"
+        exit 1
+      fi

@@ -1,12 +1,11 @@
 # 镜像漏洞扫描：对刚推送的镜像做二次校验，阻断带高危漏洞的镜像进入 STG。
 image-scan:
+  extends: .built-image-input
   stage: image-security
   interruptible: true
   image:
     name: aquasec/trivy:0.58.0@sha256:b88012e2a0a309d6a8a00463d4e63e5e513377fb74eccbc8f9b0f8f81940ebeb
     entrypoint: [""]
-  # 不使用 needs：本作业与 build-image 的触发规则不同，用 needs 会让只在 tag 存在的
-  # 流水线报 config error。阶段顺序已保证在镜像构建之后执行。
   rules:
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
   variables:
@@ -27,7 +26,7 @@ image-scan:
       if [ -n "${TRIVY_DB_REPOSITORY:-}" ]; then
         set -- "$@" --db-repository "$TRIVY_DB_REPOSITORY"
       fi
-      trivy "$@" "$REGISTRY_HOST/$IMAGE_NAME:$IMAGE_TAG"
+      trivy "$@" "$image_ref"
   artifacts:
     when: always
     paths:

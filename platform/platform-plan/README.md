@@ -1,6 +1,6 @@
 # 统一 CI/CD 与 GitOps 发版方案
 
-多供应商、多语言项目的统一交付流水线。**本仓库只放这一份方案**；流水线模板在 `platform/cicd-templates`，部署描述在 `platform/gitops-deployments`，业务仓库各自 `include` 模板。
+多供应商、多语言项目的统一交付流水线。机房首次搭建请按[机房 GitLab 部署手册](机房GitLab部署方案.md)执行。流水线模板在 `platform/cicd-templates`，部署描述在 `platform/gitops-deployments`，业务仓库各自 `include` 模板。
 
 一句话：**供应商只能提代码，能不能进环境由流水线判定；生产什么时候变，由人在窗口内点按钮决定。**
 
@@ -60,7 +60,7 @@
 
 ## 3. 流水线：9 个阶段
 
-四个示例统一引用 `platform/cicd-templates@v1.0.17`。阶段顺序见 `stages.yml`；声明 `needs` 的作业按依赖就绪情况启动。
+四个示例统一引用 `platform/cicd-templates@v1.0.19`。阶段顺序见 `stages.yml`；声明 `needs` 的作业按依赖就绪情况启动。
 
 | # | 阶段 | 作业 | 干什么 | 失败会怎样 |
 |---|---|---|---|---|
@@ -69,9 +69,9 @@
 | 3 | `build` | `*-build` | 编译打包，产物作为 artifact | 同上 |
 | 4 | `security` | `secret-scan`、`sast`、`sonarqube`、`dependency-scan`、`license-scan`+`license-gate`、`dockerfile-policy`、`iac-scan` | 密钥、静态分析、质量门、依赖漏洞、许可证、Dockerfile 基线、清单校验 | 不出镜像 |
 | 5 | `package` | `build-image` | buildah 无守护进程构建，**只打包第 3 步产物** | 没有镜像 |
-| 6 | `image-security` | `image-scan`、`sbom`、`sign-image` | 扫**最终镜像**、出物料清单、签名（待接） | 不进 STG |
+| 6 | `image-security` | `image-scan`、`sbom`、`sign-image` | 按 build-image 归档的同一 digest 扫描镜像、出物料清单、签名（待接） | 不进 STG |
 | 7 | `gitops` | `stg-promotion` | 通知甲方作业按 digest 部署并等待健康 | STG 不更新 |
-| 8 | `dast` | `dast-baseline` | 对 STG 发真实请求（ZAP baseline） | 手动触发 |
+| 8 | `dast` | `dast-baseline` | STG 就绪后按需手动扫描（ZAP baseline） | 记录扫描失败，供发布评审查看 |
 | 9 | `release` | `release-candidate`、`prod-promotion` | 在选定主干流水线上手动申请，校验 STG 凭证后自动建生产 MR | 发不了版 |
 
 **为什么这 9 个阶段能成立**：第 5 步之前的全部检查，针对的是同一份代码；第 5 步只打包第 3 步的产物，不在镜像里重新编译。所以"扫描过的 = 上线跑的"这件事可以被证明，而不是靠承诺。
@@ -115,15 +115,19 @@
 | # | 步骤 | 谁做 | 关键动作 |
 |---|---|---|---|
 | 1 | 提交合并请求 | 供应商开发 | 分支 → MR，禁止直推 `main` |
-| 2 | 门禁自动执行 | 系统 | 9 个阶段跑完，任一失败不能合并 |
-| 3 | 合并（进 STG） | **供应商自己** | 门禁全绿后供应商直接合并，甲乙都不需要点；合并即触发构建与 STG 晋级 |
+| 2 | 门禁自动执行 | 系统 | 业务 MR 执行适用的单测、lint、覆盖率、语言构建和源码安全门禁；必需检查通过后才可合并 |
+| 3 | 合并（进 STG） | **供应商自己** | 供应商合并 MR；主干重新执行检查，成功后才构建镜像并晋级 STG |
 | 4 | 构建并自动晋级 STG | 系统 | 推镜像、写 STG overlay、Argo CD 自动同步 |
-| 5 | STG 验收 | 供应商 + 发布经理 | 功能验证；需要时手动触发 `dast-baseline` |
+| 5 | STG 验收 | 供应商 + 发布经理 | 完成功能验证；DAST 按需手动执行，未执行或扫描失败均不自动阻断生产申请 |
 | 6 | 归档发布材料 | 发布经理 | `releases/<releaseId>/` 放部署清单 + 每个应用一份测试报告（Schema 校验） |
 | 7 | 选择版本 | 供应商 | 在已测版本的历史主干流水线中填写窗口清单编号 |
 | 8 | 申请生产 | 供应商 | 执行可选的手动 `release-candidate` |
 | 9 | 校验并开 MR | 甲方作业 | 匹配部署凭证、清单、测试报告和 digest 后创建生产 MR |
 | 10 | 审批合并 + 窗口内 Sync | 甲方 + 安全评审 | 合并 MR → 在发布窗口内对 prod 点 Sync |
+
+每项必填前置服务（`dependencies`，无依赖填 `[]`）和是否停机（`downtime`）。有数据库或中间件变更时填写 `databaseChanges` 或 `middlewareChanges`。申请自动携带所选流水线编号，用于核对 STG 凭证。
+
+**窗口内按服务依赖发布。** 例如 B 的 `dependencies: [A]` 表示先发 A。发布经理先合并 A 的生产 MR，在 Argo CD 同步 A，核对批准的镜像已上线、应用显示 `Synced` 和 `Healthy`，并验证 B 依赖的接口可用。通过后再合并并同步 B。若 A 失败，暂停 B。若 A 所需版本已在生产，确认版本与接口即可。两个服务各有独立 Application，顺序由发布经理控制。
 
 发布后 15 分钟内确认：Pod 全部 Ready、`/healthz` 正常、Argo CD 显示 `Synced`、没有新增告警。
 
@@ -167,7 +171,7 @@
 
 1. 把对应语言的示例项目**整套文件**复制到项目根目录（源码目录结构可以换成你自己的，`Dockerfile` 里的产物路径要对应改）。
 2. 改 `.gitlab-ci.yml` 三行：`PROJECT_KEY`（供应商代号）、`APP_NAME`、`K8S_NAMESPACE`。
-3. 在 GitOps 仓库生成部署骨架：`python3 tools/add_app.py ...`。它会一次性生成 base + 两套 overlay + AppProject + Application——这五样必须同时存在且互相对应，漏一个的表现是"Argo CD 里看不到这个应用"。
+3. 甲方在对应 Argo CD 实例注册目标集群并配置 GitOps 只读访问，为业务仓配置专用机器人和晋级变量。在 GitOps 工作分支运行 `python3 tools/add_app.py`，传入业务仓路径、语言、机器人登录名及两个环境的真实集群地址。脚本将业务部署文件、命名空间和平台策略、Argo CD 入口、晋级身份映射放入同一份变更。甲方审核接入 MR 后先确认对应集群的平台资产就绪，再做首次部署。新项目沿用现有生产窗口与冻结策略，生产仍需审批并人工同步。完整命令见 GitOps 仓库 README 的“接入新应用”。
 
 ---
 
@@ -208,7 +212,7 @@
 
 `platform/gitops-deployments` 已配置项目访问令牌 `ops-promotion-writer`，到期日为 **2027-02-20**。令牌仅有 `write_repository` scope。该项目保护分支 `main` 的最低直推角色为 Maintainer，因此机器人使用此角色。
 
-项目 CI/CD 变量名为 `GITOPS_TOKEN`，环境范围为 `promotion`，已启用 Protected、Masked 和 Hidden。新写令牌仅供甲方晋级作业使用。旧业务组令牌仍供旧模板使用，待项目切换后另行轮换回收。平台负责人应在上述到期日前轮换新令牌。
+项目 CI/CD 变量名为 `GITOPS_TOKEN`，环境范围为 `promotion`，已启用 Protected、Masked 和 Hidden。写令牌仅供甲方晋级作业使用；本地 demo-projects 组和四个业务示例项目均未配置同名变量。平台负责人应在到期日前轮换写令牌。
 
 本次通过 GitLab API 核对了令牌状态、权限和变量属性，未触发部署或执行分支写入测试。
 
@@ -231,23 +235,7 @@ kustomize 匹配不上，会**新增**一条 image 记录，而 Deployment 引�
 
 ---
 
-## 9. 已知缺口
-
-按"能不能绕过"排序：
-
-| 编号 | 缺口 | 影响 | 优先级 |
-|---|---|---|---|
-| G13 | 旧模板在业务项目使用 GitOps 写令牌，切换后需撤销上级组和项目遗留授权 | 遗留令牌仍可写生产配置 | **P0** |
-| G1 | Argo CD 实例尚未部署到真实集群 | 部署链路最后一段只在清单层面验证过 | **P0** |
-| G2 | 供应商未按子组隔离 | 供应商之间可见彼此代码 | **P0** |
-| G3 | 镜像签名未启用（`sign-image` 是手动占位） | "上生产的镜像就是 CI 构建的那个"只能靠仓库权限保证 | P1 |
-| G14 | 生产 `targetRevision` 仍是 `main` | 靠"无自动同步 + 窗口 + 人工 Sync"兜底 | P2 |
-
-G13 通过甲方项目独占写入口、按触发身份限定来源项目和部署目录、轮换旧凭据处理。G14 仍需发布负责人核对实际同步的 Git revision。
-
----
-
-## 10. 待与同事确认
+## 9. 待与同事确认
 
 这些没定之前，相关部分只能按假设做：
 
@@ -262,7 +250,7 @@ G13 通过甲方项目独占写入口、按触发身份限定来源项目和部�
 
 ---
 
-## 11. 文件职责对照
+## 10. 文件职责对照
 
 | 你要改的东西 | 改这里 |
 |---|---|
@@ -282,7 +270,7 @@ G13 通过甲方项目独占写入口、按触发身份限定来源项目和部�
 
 ---
 
-## 12. 几个刻意的取舍
+## 11. 几个刻意的取舍
 
 - **镜像里不编译**：`docker build .` 不能单独用，本地要先出制品。换来的是"镜像内容可追溯到被扫描的那一份"+"内网构建期不连依赖源"。
 - **生产不自动同步**：`applications/prod/*.yaml` 里没有 `syncPolicy.automated`。注意 `automated: {}`（空映射）在 YAML 里像"没配"，但 Argo CD 会当成开启——`validate-policy` 会拦这种写法。

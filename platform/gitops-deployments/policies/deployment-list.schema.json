@@ -73,6 +73,8 @@
               "sourceTag",
               "image",
               "previousImage",
+              "dependencies",
+              "downtime",
               "stgTest",
               "testReport"
             ],
@@ -92,11 +94,14 @@
                 "type": "string",
                 "pattern": "@sha256:[0-9a-f]{64}$"
               },
+              "databaseChanges": { "type": "string", "pattern": "\\S" },
+              "middlewareChanges": { "type": "string", "pattern": "\\S" },
               "sourcePipeline": { "type": "string", "pattern": "^[1-9][0-9]*$" },
               "dependencies": {
                 "type": "array",
                 "items": {
-                  "type": "string"
+                  "type": "string",
+                  "pattern": "\\S"
                 }
               },
               "downtime": {

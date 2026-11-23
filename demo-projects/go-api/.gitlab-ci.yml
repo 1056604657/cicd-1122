@@ -3,7 +3,7 @@
 # REGISTRY_HOST 等共享值由平台配置，晋级触发令牌按业务项目配置。
 include:
   - project: platform/cicd-templates
-    ref: v1.0.17
+    ref: v1.0.19
     file:
       - /languages/go.yml
       - /defaults.yml
@@ -58,8 +58,6 @@ sonarqube:
 
 dast-baseline:
   image: alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc
-  rules:
-    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
   script:
     - echo "【demo 占位】STG 未部署，本作业不执行真实 DAST，按通过处理"
     - echo "  接入方式：Argo CD 把 STG 跑起来后设置 DAST_TARGET_URL，删掉占位段"

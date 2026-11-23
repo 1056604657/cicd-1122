@@ -62,7 +62,7 @@ class PromotionTests(unittest.TestCase):
 
     def test_release_must_match_pipeline_and_health_receipt(self):
         ref = IMAGE + "@" + DIGEST
-        item = {"sourcePipeline": "42", "image": ref, "dependencies": [], "downtime": False}
+        item = {"image": ref, "dependencies": [], "downtime": False}
         record = dict(project="vendor/go", app="demo/go-api", pipeline="42", commit=SHA, image=ref,
                       application="go-api-stg", destination={"server": "stg"}, observedAt="2026-11-22",
                       gitopsRevision="2" * 40)
@@ -70,6 +70,10 @@ class PromotionTests(unittest.TestCase):
             def verify():
                 return production_image(Path("."), "REL-20261122-001", "vendor/go", "demo/go-api", "42", SHA, record)
             self.assertEqual(verify(), ref)
+            record["pipeline"] = "43"
+            with self.assertRaises(ValueError):
+                verify()
+            record["pipeline"] = "42"
             item["sourcePipeline"] = "43"
             with self.assertRaises(ValueError):
                 verify()

@@ -15,7 +15,7 @@ npm run build
 
 ## 流水线
 
-本项目通过 `.gitlab-ci.yml` 引用 `platform/cicd-templates@v1.0.17` 的对应语言模板。
+本项目通过 `.gitlab-ci.yml` 引用 `platform/cicd-templates@v1.0.19` 的对应语言模板。
 
 1. 供应商提交 MR，执行语言测试、覆盖率、构建和适用门禁。
 2. 合并主干后，Buildah 在 `docker-build` 构建并推送镜像。甲方 GitOps 作业按 digest 部署 STG，确认 Argo CD 报告指定版本已同步且健康，再归档凭证。

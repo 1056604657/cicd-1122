@@ -40,7 +40,7 @@ tools/validate_repo.py                   本仓库的策略校验（流水线里
 
 STG 作业写入镜像 digest，使用 `STG_ARGOCD_URL`（HTTPS）及 `STG_ARGOCD_READ_TOKEN` 查询对应 Application。令牌仅授权 STG 应用 get，变量限定在甲方 `promotion` 环境；私有 CA 应安装在运维作业信任库。仅在对应 GitOps revision 显示 Synced、Healthy 且应用报告该镜像时，将凭证写入 `evidence/stg/<项目>/<应用>/<业务流水线编号>.json`。等待上限 10 分钟。观察或凭证写入失败，可重试；已被跳过的版本不能补作健康证明。
 
-生产申请读取所选业务流水线的凭证及甲方 main 已归档的窗口清单。供应商提交材料，甲方归档；每项包含 `sourcePipeline`（字符串）、`dependencies`、`downtime`、版本、前后镜像及测试报告。报告与清单的版本标签、应用、项目、窗口及 digest 必须一致，功能测试由供应商签认。每个申请仅改一个应用的生产 overlay，同一窗口可关联多个应用的 MR。
+生产申请读取所选业务流水线的凭证及甲方 main 已归档的窗口清单。供应商提交材料，甲方归档；每项必须填写前置服务 `dependencies`（无依赖填 `[]`）、停机影响 `downtime`（布尔值）、版本、前后镜像及测试报告。有数据库或中间件变更时分别填写 `databaseChanges`、`middlewareChanges`。申请自动携带业务流水线编号。报告与清单的版本标签、应用、项目、窗口及 digest 必须一致，功能测试由供应商签认。每个申请仅改一个应用的生产 overlay，同一窗口可关联多个应用的 MR。
 
 ### 切换到新模板前
 
@@ -52,14 +52,16 @@ STG 作业写入镜像 digest，使用 `STG_ARGOCD_URL`（HTTPS）及 `STG_ARGOC
 
 验收时检查业务流水线与 GitOps 流水线均成功、提交只改目标 STG overlay，以及 Argo CD 实际同步情况。失败的镜像门禁、过期主干、未登记触发身份都应阻止写入。生产候选仅产生待审 MR。旧流水线保留原作业图；仅拥有旧 STG tag 的版本缺少健康凭证，应在新流程下部署并验收后申请。切换 GitOps 接收端前处理在途申请，旧 tag 发布请求将被拒绝。
 
-## 日常操作
+## 接入新应用
+
+甲方先在对应的 Argo CD 实例登记 STG、PROD 集群并配置 GitOps 仓库只读凭据，按上一节为业务项目准备专用机器人、触发令牌和 CI 变量。下面的命令需要 Python 3 和 PyYAML，参数中的机器人是实际 GitLab 登录名。应用名用于 Argo CD 和命名空间，在本 GitOps 仓库中须唯一。
 
 ```bash
-# 新增一个应用：一次生成 base + 两套 overlay + AppProject + Application
-# 手写这五样必然漏一处，漏了的表现是"Argo CD 里看不到这个应用"
+# 在 GitOps 工作分支生成一次接入变更
 python3 tools/add_app.py --project-key acme --app order-api --language java \
-  --registry-host <镜像仓库> --gitlab-project-path <完整项目路径> \
-  --server-stg <...> --server-prod <...> --gitops-url <...>
+  --registry-host registry.internal --gitlab-project-path vendors/acme/order-api --robot promote-order-api \
+  --server-stg https://stg-cce.internal --server-prod https://prod-cce.internal \
+  --gitops-url https://gitlab.internal/platform/gitops-deployments.git
 
 # 本仓库策略校验（与流水线同一个脚本）
 python3 tools/validate_repo.py --root .
@@ -70,6 +72,10 @@ kustomize build apps/demo/java-api/overlays/prod
 # 校验全部 overlay
 for d in apps/*/*/overlays/*/; do kustomize build "$d" >/dev/null && echo "OK $d"; done
 ```
+
+审核同一个接入 MR 中的应用部署文件、两环境的 Argo CD 入口和晋级身份映射。每个环境生成两个 Application：业务应用管理 Deployment 和 Service，平台应用管理该业务命名空间、配额、限额和网络策略。两者指向参数指定的同一目标集群。新应用的权限与同步策略沿用示例基线，生产窗口取自生产平台 AppProject。
+
+首次接入时，甲方先确认平台应用已同步、目标命名空间已就绪，再触发首次 STG 部署。初始镜像 digest 是占位值。生产先在批准窗口同步平台资产，业务应用须等首个已测试版本的生产 MR 合并后再人工同步。CI 的 `validate-kustomize` 会在临时目录生成一个应用并从两环境入口验证。
 
 ## 占位符
 

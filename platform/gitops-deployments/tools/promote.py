@@ -75,8 +75,8 @@ def production_image(root, release_id, project, app, pipeline_id, sha, record):
     owner, entries = checked_materials(root, release_id)
     require(owner == key and name in entries, "窗口清单未包含本项目和应用")
     entry = entries[name]
-    require(entry.get("sourcePipeline") == pipeline_id, "清单与所选业务流水线不符")
-    require("downtime" in entry and "dependencies" in entry, "请明确依赖和停机影响")
+    if "sourcePipeline" in entry:  # 兼容已经填写流水线编号的清单
+        require(entry["sourcePipeline"] == pipeline_id, "清单与所选业务流水线不符")
     require((record["project"], record["app"], record["pipeline"], record["commit"], record["image"])
             == (project, app, pipeline_id, sha, entry["image"]), "清单与 STG 健康部署凭证不符")
     require(re.fullmatch("[0-9a-f]{40}", record.get("gitopsRevision", "")) and

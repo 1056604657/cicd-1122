@@ -9,18 +9,18 @@
 目录里只要有子目录，GitOps 仓库的 `validate-policy` 作业就会逐份校验：
 缺部署清单、缺某个应用的测试报告、字段不符 Schema，都会阻断 MR。
 
-`deployment-list` 里必须写的三样：`releaseId`、`commit`、`image digest`。
-这三样是"发布的东西 = 测过的东西 = 批过的东西"的连接点，缺一样审计就断链。
+清单登记窗口编号、应用版本与镜像 digest。甲方作业从所选业务流水线获取编号和源码提交，并与 STG 部署凭证核对。供应商无需在清单里填写流水线编号。
 
 ## 每个应用要写 `stgTest`：供应商对"STG 测过"的确认
 
 ```yaml
 applications:
   - name: java-api
-    sourcePipeline: "12345"         # 已在 STG 健康部署的业务流水线编号
     sourceTag: v1.2.3              # 清单和报告共同使用的版本名
-    dependencies: []
-    downtime: false
+    dependencies: [go-api]         # go-api 先发且验证通过；无前置依赖填 []
+    downtime: false                # 必填，按实际影响填 true 或 false
+    databaseChanges: "发布前新增订单索引"  # 无数据库变更可省略
+    middlewareChanges: "发布前创建订单消息队列"  # 无中间件变更可省略
     image: harbor/demo-projects-java-api@sha256:...
     previousImage: harbor/demo-projects-java-api@sha256:...
     stgTest:                       # ← 必填
